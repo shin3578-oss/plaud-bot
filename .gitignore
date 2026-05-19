@@ -1,0 +1,11 @@
+.env
+plaud_storage.json
+plaud_cookies.json
+lw_session/
+plaud_session/
+*.key
+*.png
+*.log
+*.json
+!requirements.txt
+__pycache__/
