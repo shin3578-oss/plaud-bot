@@ -6,7 +6,9 @@
 3. PlaywrightでLINE WORKSの「歯科医師」グループに投稿
 """
 import json, gzip, requests, os, time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
 
 PLAUD_API       = "https://api-apne1.plaud.ai"
 PLAUD_TOKEN     = os.environ["PLAUD_TOKEN"]
@@ -28,9 +30,11 @@ def find_latest_asaren():
         headers=headers, timeout=30
     )
     r.raise_for_status()
+    today = datetime.now(JST).strftime("%Y-%m-%d")
     for f in r.json().get("data_file_list", []):
         title = f.get("filename", "") or f.get("title", "")
-        if "朝練" in title:
+        start_time = f.get("start_time", "")
+        if "朝練" in title and start_time.startswith(today):
             return f.get("id", ""), title
     return None, None
 
