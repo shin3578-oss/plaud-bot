@@ -56,12 +56,27 @@ def get_file_summary(file_id):
 
 def get_share_url(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
+    # まず既存URLを取得
     r = requests.post(
         f"{PLAUD_API}/share/public/get", headers=headers,
         json={"object_id": file_id, "object_type": "file"}, timeout=30
     )
     r.raise_for_status()
-    return r.json().get("data", {}).get("share_url", "")
+    resp = r.json()
+    print(f"[DEBUG] share/public/get response: {resp}")
+    share_url = resp.get("data", {}).get("share_url", "")
+    if share_url:
+        return share_url
+
+    # 未発行の場合は作成を試みる
+    r2 = requests.post(
+        f"{PLAUD_API}/share/public/create", headers=headers,
+        json={"object_id": file_id, "object_type": "file"}, timeout=30
+    )
+    print(f"[DEBUG] share/public/create status: {r2.status_code}, response: {r2.text[:300]}")
+    if r2.ok:
+        return r2.json().get("data", {}).get("share_url", "")
+    return ""
 
 
 # ========================
