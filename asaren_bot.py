@@ -58,6 +58,8 @@ def get_file_summary(file_id):
     return ""
 
 
+SHARE_CONTENT = {"overview": True, "transcript": True, "audio": False}
+
 def get_share_url(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
     r = requests.post(
@@ -65,13 +67,25 @@ def get_share_url(file_id):
         json={"object_id": file_id, "object_type": "file"}, timeout=30
     )
     r.raise_for_status()
-    share_url = r.json().get("data", {}).get("share_url", "")
+    data = r.json().get("data", {})
+    share_url = data.get("share_url", "")
+
     if share_url:
+        # コンテンツ設定が無効なら更新する
+        cfg = data.get("content_config", {})
+        if not cfg.get("overview") and not cfg.get("transcript"):
+            requests.post(
+                f"{PLAUD_API}/share/public/update", headers=headers,
+                json={"object_id": file_id, "object_type": "file", "content_config": SHARE_CONTENT},
+                timeout=30
+            )
         return share_url
-    # 未発行の場合は作成
+
+    # 未発行の場合はAI要約を有効にして作成
     r2 = requests.post(
         f"{PLAUD_API}/share/public/create", headers=headers,
-        json={"object_id": file_id, "object_type": "file"}, timeout=30
+        json={"object_id": file_id, "object_type": "file", "content_config": SHARE_CONTENT},
+        timeout=30
     )
     r2.raise_for_status()
     return r2.json().get("data", {}).get("share_url", "")
