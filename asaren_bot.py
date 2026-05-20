@@ -58,7 +58,7 @@ def get_file_summary(file_id):
     return ""
 
 
-SHARE_CONTENT = {"overview": True, "transcript": True, "audio": False}
+SHARE_CONTENT = {"overview": True, "transcript": True, "notes": True, "audio": False}
 
 def get_share_url(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
@@ -73,12 +73,13 @@ def get_share_url(file_id):
     if share_url:
         # コンテンツ設定が無効なら更新する
         cfg = data.get("content_config", {})
-        if not cfg.get("overview") and not cfg.get("transcript"):
-            requests.post(
+        if not cfg.get("overview") or not cfg.get("notes"):
+            r_upd = requests.post(
                 f"{PLAUD_API}/share/public/update", headers=headers,
                 json={"object_id": file_id, "object_type": "file", "content_config": SHARE_CONTENT},
                 timeout=30
             )
+            print(f"共有設定更新: {r_upd.status_code} {r_upd.text[:200]}")
         return share_url
 
     # 未発行の場合はAI要約を有効にして作成
