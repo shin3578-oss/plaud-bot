@@ -72,12 +72,16 @@ def get_share_url(file_id, note_ids):
 
     if share_url:
         cfg = data.get("content_config", {})
+        print(f"共有設定(現在): overview={cfg.get('overview')} notes={cfg.get('notes')}")
         if not cfg.get("overview") or not cfg.get("notes"):
-            requests.post(
+            r_upd = requests.post(
                 f"{PLAUD_API}/share/public/update", headers=headers,
                 json={"object_id": file_id, "object_type": "file", "content_config": content_config},
                 timeout=30
             )
+            print(f"共有設定更新: {r_upd.status_code} {r_upd.text[:200]}")
+        else:
+            print("共有設定: 既に正しく設定済み")
         return share_url
 
     r2 = requests.post(
