@@ -63,8 +63,15 @@ def get_file_summary(detail):
 
 
 def get_note_ids(detail):
-    return [item["id"] for item in detail.get("content_list", [])
-            if item.get("data_type") == "auto_sum_note" and item.get("id")]
+    ids = []
+    for item in detail.get("content_list", []):
+        print(f"[DEBUG] content item: type={item.get('data_type')} keys={list(item.keys())}")
+        if item.get("data_type") == "auto_sum_note":
+            note_id = item.get("id") or item.get("content_id") or item.get("note_id")
+            if note_id:
+                ids.append(str(note_id))
+    print(f"[DEBUG] note_ids: {ids}")
+    return ids
 
 
 def get_share_url(file_id, note_ids):
