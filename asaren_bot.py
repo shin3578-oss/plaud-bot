@@ -19,7 +19,7 @@ LW_CLIENT_ID      = "0cAEPO2Yzau80tSsEhxV"
 LW_CLIENT_SECRET  = "d7WfxxO2t1"
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID         = "12266491"
-LW_ASAREN_CH      = "408877489"
+LW_ASAREN_CH      = "6854ad46-6be5-bc50-f6ea-5efa1831062f"
 LW_PRIVATE_KEY    = os.environ["LW_PRIVATE_KEY"]
 
 
