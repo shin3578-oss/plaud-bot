@@ -21,14 +21,11 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
-      - name: Playwright ブラウザをインストール
-        run: playwright install chromium --with-deps
-
       - name: 軸MTG Botを実行
         env:
           PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
           GOOGLE_DOCS_ID:          ${{ secrets.GOOGLE_DOCS_ID }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
-          LW_LOGIN_ID:             ${{ secrets.LW_LOGIN_ID }}
-          LW_PASSWORD:             ${{ secrets.LW_PASSWORD }}
+          LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_JIKU_CH:              ${{ secrets.LW_JIKU_CH }}
         run: python plaud_bot.py
