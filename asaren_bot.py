@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-朝練Bot - 毎日10:00 JST (GitHub Actions / Playwright)
+朝練Bot - 毎日10:00 JST (GitHub Actions / LINE WORKS Bot API)
 1. PLAUDから最新の「朝練」ファイルの要約を取得
 2. Google Docsに追記
-3. PlaywrightでLINE WORKSの「歯科医師」グループに投稿
+3. LINE WORKS Bot APIで「歯科医師」チャンネルに投稿
 """
 import json, gzip, requests, os, time
 from datetime import datetime, timezone, timedelta
@@ -14,9 +14,13 @@ PLAUD_API       = "https://api-apne1.plaud.ai"
 PLAUD_TOKEN     = os.environ["PLAUD_TOKEN"]
 GOOGLE_DOCS_ID  = os.environ["GOOGLE_DOCS_ID_ASAREN"]
 GOOGLE_CREDS    = os.environ["GOOGLE_CREDENTIALS_JSON"]
-LW_ID           = os.environ["LW_LOGIN_ID"]
-LW_PASS         = os.environ["LW_PASSWORD"]
-LW_GROUP        = "歯科医師"
+
+LW_CLIENT_ID      = "0cAEPO2Yzau80tSsEhxV"
+LW_CLIENT_SECRET  = "d7WfxxO2t1"
+LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
+LW_BOT_ID         = "12266491"
+LW_ASAREN_CH      = "408877489"
+LW_PRIVATE_KEY    = os.environ["LW_PRIVATE_KEY"]
 
 
 # ========================
@@ -56,27 +60,21 @@ def get_file_summary(file_id):
 
 def get_share_url(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    # まず既存URLを取得
     r = requests.post(
         f"{PLAUD_API}/share/public/get", headers=headers,
         json={"object_id": file_id, "object_type": "file"}, timeout=30
     )
     r.raise_for_status()
-    resp = r.json()
-    print(f"[DEBUG] share/public/get response: {resp}")
-    share_url = resp.get("data", {}).get("share_url", "")
+    share_url = r.json().get("data", {}).get("share_url", "")
     if share_url:
         return share_url
-
-    # 未発行の場合は作成を試みる
+    # 未発行の場合は作成
     r2 = requests.post(
         f"{PLAUD_API}/share/public/create", headers=headers,
         json={"object_id": file_id, "object_type": "file"}, timeout=30
     )
-    print(f"[DEBUG] share/public/create status: {r2.status_code}, response: {r2.text[:300]}")
-    if r2.ok:
-        return r2.json().get("data", {}).get("share_url", "")
-    return ""
+    r2.raise_for_status()
+    return r2.json().get("data", {}).get("share_url", "")
 
 
 # ========================
@@ -92,7 +90,7 @@ def append_to_google_docs(title, summary, share_url):
         scopes=["https://www.googleapis.com/auth/documents"]
     )
     service = build("docs", "v1", credentials=creds)
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(JST).strftime("%Y-%m-%d")
     sep = "=" * 50
     content = f"\n\n{sep}\n{today}  {title}\n{sep}\n\n{summary}\n\n共有リンク: {share_url}\n"
     doc = service.documents().get(documentId=GOOGLE_DOCS_ID).execute()
@@ -105,48 +103,41 @@ def append_to_google_docs(title, summary, share_url):
 
 
 # ========================
-# LINE WORKS (Playwright)
+# LINE WORKS Bot API
 # ========================
 
+def get_lw_access_token():
+    import jwt as pyjwt
+    now = int(time.time())
+    token = pyjwt.encode(
+        {"iss": LW_CLIENT_ID, "sub": LW_SERVICE_ACCOUNT, "iat": now, "exp": now + 3600},
+        LW_PRIVATE_KEY, algorithm="RS256"
+    )
+    r = requests.post(
+        "https://auth.worksmobile.com/oauth2/v2.0/token",
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": token,
+            "client_id": LW_CLIENT_ID,
+            "client_secret": LW_CLIENT_SECRET,
+            "scope": "bot",
+        },
+        timeout=30
+    )
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
 def send_to_lineworks(message):
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        page = browser.new_page()
-        page.goto("https://talk.worksmobile.com/")
-        time.sleep(3)
-
-        # ログイン
-        page.wait_for_selector('input[type="text"]', timeout=15000)
-        page.fill('input[type="text"]', LW_ID)
-        page.click('button:has-text("ログイン")')
-        time.sleep(2)
-        page.wait_for_selector('input[type="password"]', timeout=15000)
-        page.fill('input[type="password"]', LW_PASS)
-        page.click('button:has-text("ログイン")')
-        page.wait_for_function(
-            "!window.location.href.startsWith('https://auth.worksmobile.com')",
-            timeout=60000
-        )
-        time.sleep(3)
-
-        # グループ検索・選択
-        search = page.locator('input[placeholder*="検索"]').first
-        search.click(timeout=10000)
-        search.fill(LW_GROUP)
-        time.sleep(2)
-        page.locator(f'text="{LW_GROUP}"').first.click(timeout=10000)
-        time.sleep(2)
-
-        # メッセージ送信
-        editor = page.locator('div[contenteditable="true"]').last
-        editor.click(timeout=10000)
-        editor.type(message)
-        time.sleep(1)
-        page.keyboard.press("Enter")
-        time.sleep(2)
-        browser.close()
+    access_token = get_lw_access_token()
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    r = requests.post(
+        f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/channels/{LW_ASAREN_CH}/messages",
+        headers=headers,
+        json={"content": {"type": "text", "text": message}},
+        timeout=30
+    )
+    r.raise_for_status()
     print("LINE WORKS送信完了")
 
 
@@ -155,7 +146,7 @@ def send_to_lineworks(message):
 # ========================
 
 def main():
-    print(f"朝練Bot 開始: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"朝練Bot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
 
     file_id, title = find_latest_asaren()
     if not file_id:
@@ -178,7 +169,7 @@ def main():
     lw_message = f"【朝練議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
     send_to_lineworks(lw_message)
 
-    print(f"完了: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 if __name__ == "__main__":

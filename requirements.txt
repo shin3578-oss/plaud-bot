@@ -1,4 +1,5 @@
 requests
 google-auth
 google-api-python-client
-playwright
+PyJWT
+cryptography
