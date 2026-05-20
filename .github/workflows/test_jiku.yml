@@ -1,0 +1,22 @@
+name: 軸MTG テスト投稿
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: テスト実行
+        env:
+          PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
+          GOOGLE_DOCS_ID:          ${{ secrets.GOOGLE_DOCS_ID }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_JIKU_CH:              ${{ secrets.LW_JIKU_CH }}
+        run: python test_jiku.py
