@@ -70,7 +70,7 @@ def get_note_ids(detail):
 
 def get_share_url(file_id, note_ids):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    content_config = {"overview": True, "transcript": True, "audio": False, "notes": note_ids}
+    content_config = {"overview": True, "transcript": False, "audio": False, "notes": note_ids}
 
     r = requests.post(
         f"{PLAUD_API}/share/public/get", headers=headers,
@@ -82,7 +82,7 @@ def get_share_url(file_id, note_ids):
 
     if share_url:
         cfg = data.get("content_config", {})
-        if not cfg.get("overview") or not cfg.get("notes"):
+        if not cfg.get("overview") or not cfg.get("notes") or cfg.get("transcript"):
             r_upd = requests.post(
                 f"{PLAUD_API}/share/public/update", headers=headers,
                 json={"object_id": file_id, "object_type": "file", "content_config": content_config},
