@@ -55,10 +55,14 @@ def get_file_summary(detail):
     for item in detail.get("content_list", []):
         if item.get("data_type") == "auto_sum_note":
             r_s3 = requests.get(item["data_link"], timeout=30)
+            print(f"S3レスポンス: status={r_s3.status_code}, size={len(r_s3.content)}bytes")
             try:
                 return json.loads(gzip.decompress(r_s3.content)).get("ai_content", "")
             except Exception:
-                return r_s3.json().get("ai_content", "")
+                try:
+                    return r_s3.json().get("ai_content", "")
+                except Exception:
+                    print(f"S3内容プレビュー: {r_s3.content[:200]}")
     return ""
 
 

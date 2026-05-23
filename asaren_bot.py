@@ -55,10 +55,14 @@ def get_file_summary(detail):
     for item in detail.get("content_list", []):
         if item.get("data_type") == "auto_sum_note":
             r_s3 = requests.get(item["data_link"], timeout=30)
+            print(f"S3レスポンス: status={r_s3.status_code}, size={len(r_s3.content)}bytes")
             try:
                 return json.loads(gzip.decompress(r_s3.content)).get("ai_content", "")
             except Exception:
-                return r_s3.json().get("ai_content", "")
+                try:
+                    return r_s3.json().get("ai_content", "")
+                except Exception:
+                    print(f"S3内容プレビュー: {r_s3.content[:200]}")
     return ""
 
 
@@ -169,7 +173,13 @@ def send_to_lineworks(message):
 # ========================
 
 def main():
-    print(f"朝練Bot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
+    now_jst = datetime.now(JST)
+    print(f"朝練Bot 開始: {now_jst.strftime('%Y-%m-%d %H:%M:%S')} JST")
+
+    # 実行時刻ガード: 10:00 JST 予定。GitHub Actions遅延を考慮し7:00-14:00のみ許可
+    if not (7 <= now_jst.hour < 14):
+        print(f"ERROR: 実行時刻 {now_jst.strftime('%H:%M')} JST は許容範囲外 (07:00-14:00) のため中断します")
+        return
 
     file_id, title = find_latest_asaren()
     if not file_id:
