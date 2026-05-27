@@ -5,7 +5,7 @@
 2. Google Docsに追記
 3. LINE WORKS Bot APIで「軸」チャンネルに投稿
 """
-import json, gzip, requests, os, time
+import json, gzip, requests, os, time, re
 from datetime import datetime, timezone, timedelta
 
 JST = timezone(timedelta(hours=9))
@@ -56,13 +56,30 @@ def get_file_summary(detail):
         if item.get("data_type") == "auto_sum_note":
             r_s3 = requests.get(item["data_link"], timeout=30)
             print(f"S3レスポンス: status={r_s3.status_code}, size={len(r_s3.content)}bytes")
+            # ① gzip + JSON 形式（旧形式）
             try:
                 return json.loads(gzip.decompress(r_s3.content)).get("ai_content", "")
             except Exception:
-                try:
-                    return r_s3.json().get("ai_content", "")
-                except Exception:
-                    print(f"S3内容プレビュー: {r_s3.content[:200]}")
+                pass
+            # ② JSON 形式（非圧縮）
+            try:
+                return r_s3.json().get("ai_content", "")
+            except Exception:
+                pass
+            # ③ プレーンMarkdown形式（新形式）
+            try:
+                text = r_s3.text.strip()
+                if text:
+                    # 画像リンクを除去 (![...](...)
+                    text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+                    # 余分な空行を整理
+                    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+                    if text:
+                        print(f"プレーンMarkdown形式で取得: {len(text)}文字")
+                        return text
+            except Exception as e:
+                print(f"プレーンテキスト取得エラー: {e}")
+            print(f"S3内容プレビュー: {r_s3.content[:200]}")
     return ""
 
 
