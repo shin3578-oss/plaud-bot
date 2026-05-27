@@ -35,10 +35,14 @@ def find_latest_jiku_mtg():
     )
     r.raise_for_status()
     today = datetime.now(JST).strftime("%Y-%m-%d")
-    for f in r.json().get("data_file_list", []):
+    print(f"本日の日付: {today}")
+    files = r.json().get("data_file_list", [])
+    print(f"取得したファイル数: {len(files)}")
+    for f in files:
         title = f.get("filename", "") or f.get("title", "")
         start_time = f.get("start_time", 0)
         file_date = datetime.fromtimestamp(start_time / 1000, tz=JST).strftime("%Y-%m-%d")
+        print(f"  [{file_date}] {title!r}")
         if "軸MTG" in title and file_date == today:
             return f.get("id", ""), title
     return None, None
