@@ -2,7 +2,7 @@ name: 軸MTG Bot 議事録自動投稿
 
 on:
   schedule:
-    - cron: '0 12 * * 3'  # 毎週水曜 21:00 JST (= 12:00 UTC)
+    - cron: '0 13 * * 3'  # 毎週水曜 22:00 JST (= 13:00 UTC)
   workflow_dispatch:       # 手動実行も可能
 
 jobs:
