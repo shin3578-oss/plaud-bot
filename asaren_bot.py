@@ -34,7 +34,8 @@ def find_latest_asaren():
         headers=headers, timeout=30
     )
     r.raise_for_status()
-    today = datetime.now(JST).strftime("%Y-%m-%d")
+    today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
+    print(f"対象日付: {today}")
     for f in r.json().get("data_file_list", []):
         title = f.get("filename", "") or f.get("title", "")
         start_time = f.get("start_time", 0)

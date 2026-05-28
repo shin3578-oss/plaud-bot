@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '43 2 * * 3,4,5,6'  # 水木金土 11:43 JST (= 02:43 UTC)
   workflow_dispatch:      # 手動実行も可能
+    inputs:
+      target_date:
+        description: '対象日付 (YYYY-MM-DD) 省略時は当日'
+        required: false
+        default: ''
 
 jobs:
   run-bot:
@@ -27,4 +32,5 @@ jobs:
           GOOGLE_DOCS_ID_ASAREN:   ${{ secrets.GOOGLE_DOCS_ID_ASAREN }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          TARGET_DATE:             ${{ github.event.inputs.target_date }}
         run: python asaren_bot.py
