@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '18 12 * * 3'  # 毎週水曜 21:18 JST (= 12:18 UTC)
   workflow_dispatch:       # 手動実行も可能
+    inputs:
+      target_date:
+        description: '対象日付 (YYYY-MM-DD) 省略時は当日'
+        required: false
+        default: ''
 
 jobs:
   run-bot:
@@ -28,4 +33,5 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
           LW_JIKU_CH:              ${{ secrets.LW_JIKU_CH }}
+          TARGET_DATE:             ${{ github.event.inputs.target_date }}
         run: python plaud_bot.py
