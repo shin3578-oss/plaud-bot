@@ -68,7 +68,7 @@ def get_file_summary(detail):
                 pass
             # ③ プレーンMarkdown形式（新形式）
             try:
-                text = r_s3.text.strip()
+                text = r_s3.content.decode('utf-8').strip()
                 if text:
                     # 画像リンクを除去 (![...](...)
                     text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
