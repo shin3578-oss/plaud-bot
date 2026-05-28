@@ -72,6 +72,8 @@ def get_file_summary(detail):
                 if text:
                     # 画像リンクを除去 (![...](...)
                     text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+                    # コア・シノプシス（他録音との合体要約）セクションを除去
+                    text = re.sub(r'##\s*コア[・･]シノプシス.*?(?=##|\Z)', '', text, flags=re.DOTALL)
                     # 余分な空行を整理
                     text = re.sub(r'\n{3,}', '\n\n', text).strip()
                     if text:
