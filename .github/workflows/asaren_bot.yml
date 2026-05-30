@@ -1,9 +1,7 @@
 name: 朝練Bot 議事録自動投稿
 
 on:
-  schedule:
-    - cron: '43 2 * * 3,4,5,6'  # 水木金土 11:43 JST (= 02:43 UTC)
-  workflow_dispatch:      # 手動実行も可能
+  workflow_dispatch:      # 手動実行 / Cron-job.org経由で起動
     inputs:
       target_date:
         description: '対象日付 (YYYY-MM-DD) 省略時は当日'
