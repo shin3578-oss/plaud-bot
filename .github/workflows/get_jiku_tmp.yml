@@ -1,11 +1,16 @@
-name: get-jiku-ch-tmp
+name: copy-jiku-ch-tmp
 on:
   workflow_dispatch:
 jobs:
-  get:
+  copy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: show encoded channel id
+      - name: copy LW_JIKU_CH to apotool-automation
         env:
           CH: ${{ secrets.LW_JIKU_CH }}
-        run: python3 -c "import base64,os; print(base64.b64encode(os.environ['CH'].encode()).decode())"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$CH" | gh secret set LW_JIKU_CH --repo shin3578-oss/apotool-automation --body "$CH"
+          echo "コピー完了"
