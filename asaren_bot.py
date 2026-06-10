@@ -193,38 +193,47 @@ def send_to_lineworks(message):
 # ========================
 
 def main():
-    now_jst = datetime.now(JST)
-    print(f"朝練Bot 開始: {now_jst.strftime('%Y-%m-%d %H:%M:%S')} JST")
+    print(f"朝練Bot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')} JST")
 
-    # 実行時刻ガード: 12:00 JST 予定。GitHub Actions遅延を考慮し7:00-20:00のみ許可
-    if not (7 <= now_jst.hour < 20):
-        print(f"ERROR: 実行時刻 {now_jst.strftime('%H:%M')} JST は許容範囲外 (07:00-20:00) のため中断します")
+    MAX_ATTEMPTS = 6
+    RETRY_INTERVAL = 3600  # 1時間
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        now_jst = datetime.now(JST)
+        print(f"\n--- 試行 {attempt}/{MAX_ATTEMPTS}: {now_jst.strftime('%H:%M')} JST ---")
+
+        file_id, title = find_latest_asaren()
+        if not file_id:
+            print("朝練ファイルが見つかりません")
+            if attempt < MAX_ATTEMPTS:
+                print("1時間後に再試行します...")
+                time.sleep(RETRY_INTERVAL)
+            continue
+
+        print(f"対象: {title}")
+        detail = get_file_detail(file_id)
+        summary = get_file_summary(detail)
+
+        if not summary:
+            print("要約がまだ生成されていません")
+            if attempt < MAX_ATTEMPTS:
+                print("1時間後に再試行します...")
+                time.sleep(RETRY_INTERVAL)
+            continue
+
+        note_ids = get_note_ids(detail)
+        share_url = get_share_url(file_id, note_ids)
+        if not share_url:
+            print("ERROR: 共有URL取得失敗")
+            return
+
+        append_to_google_docs(title, summary, share_url)
+        lw_message = f"【朝練議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
+        send_to_lineworks(lw_message)
+        print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
         return
 
-    file_id, title = find_latest_asaren()
-    if not file_id:
-        print("ERROR: 朝練ファイルが見つかりません")
-        return
-    print(f"対象: {title}")
-
-    detail = get_file_detail(file_id)
-    summary = get_file_summary(detail)
-    if not summary:
-        print("ERROR: 要約取得失敗")
-        return
-
-    note_ids = get_note_ids(detail)
-    share_url = get_share_url(file_id, note_ids)
-    if not share_url:
-        print("ERROR: 共有URL取得失敗")
-        return
-
-    append_to_google_docs(title, summary, share_url)
-
-    lw_message = f"【朝練議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
-    send_to_lineworks(lw_message)
-
-    print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"ERROR: {MAX_ATTEMPTS}回試みましたが朝練ファイルまたは要約が見つかりませんでした")
 
 
 if __name__ == "__main__":
