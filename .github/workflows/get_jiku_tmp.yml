@@ -4,13 +4,11 @@ on:
 jobs:
   copy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: copy LW_JIKU_CH to apotool-automation
         env:
           CH: ${{ secrets.LW_JIKU_CH }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT_COPY }}
         run: |
-          echo "$CH" | gh secret set LW_JIKU_CH --repo shin3578-oss/apotool-automation --body "$CH"
-          echo "コピー完了"
+          gh secret set LW_JIKU_CH --repo shin3578-oss/apotool-automation --body "$CH"
+          echo done
