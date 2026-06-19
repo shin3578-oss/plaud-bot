@@ -20,6 +20,7 @@ LW_CLIENT_SECRET  = "d7WfxxO2t1"
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID         = "12266491"
 LW_ASAREN_CH      = "6854ad46-6be5-bc50-f6ea-5efa1831062f"
+LW_SHINCHO_ID     = "shin@ovalcourtdental"
 LW_PRIVATE_KEY    = os.environ["LW_PRIVATE_KEY"]
 
 
@@ -188,6 +189,23 @@ def send_to_lineworks(message):
     print("LINE WORKS送信完了")
 
 
+def send_alert_to_shincho(message):
+    """院長へDMでアラートを送る（エラー通知用）"""
+    try:
+        access_token = get_lw_access_token()
+        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        r = requests.post(
+            f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
+            headers=headers,
+            json={"content": {"type": "text", "text": message}},
+            timeout=30
+        )
+        r.raise_for_status()
+        print(f"院長へアラート送信完了")
+    except Exception as e:
+        print(f"アラート送信失敗: {e}")
+
+
 # ========================
 # Main
 # ========================
@@ -197,6 +215,8 @@ def main():
 
     MAX_ATTEMPTS = 6
     RETRY_INTERVAL = 3600  # 1時間
+    today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
+    no_file_count = 0
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         now_jst = datetime.now(JST)
@@ -204,6 +224,7 @@ def main():
 
         file_id, title = find_latest_asaren()
         if not file_id:
+            no_file_count += 1
             print("朝練ファイルが見つかりません")
             if attempt < MAX_ATTEMPTS:
                 print("1時間後に再試行します...")
@@ -233,7 +254,16 @@ def main():
         print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
         return
 
-    print(f"ERROR: {MAX_ATTEMPTS}回試みましたが朝練ファイルまたは要約が見つかりませんでした")
+    # 全リトライ失敗 → 院長にDMで通知
+    if no_file_count == MAX_ATTEMPTS:
+        # 1回もファイルが見つからなかった = アップロード忘れの可能性が高い
+        alert = f"【朝練Bot】{today} の朝練ファイルがPLAUDに見つかりませんでした。\n\nPLAUDへのアップロードをご確認ください。\nアップロード後は GitHub Actions の「朝練Bot」を手動実行すると投稿できます。"
+    else:
+        # ファイルはあるが要約が生成されなかった
+        alert = f"【朝練Bot】{today} の朝練要約が6時間待っても生成されませんでした。\n\nPLAUDのAI要約の状態をご確認ください。"
+
+    print(f"ERROR: {MAX_ATTEMPTS}回試みましたが失敗しました")
+    send_alert_to_shincho(alert)
 
 
 if __name__ == "__main__":
