@@ -72,11 +72,8 @@ def get_file_summary(detail):
             try:
                 text = r_s3.content.decode('utf-8').strip()
                 if text:
-                    # 画像リンクを除去 (![...](...)
                     text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
-                    # コア・シノプシス（他録音との合体要約）セクションを除去
                     text = re.sub(r'##\s*コア[・･]シノプシス.*?(?=##|\Z)', '', text, flags=re.DOTALL)
-                    # 余分な空行を整理
                     text = re.sub(r'\n{3,}', '\n\n', text).strip()
                     if text:
                         print(f"プレーンMarkdown形式で取得: {len(text)}文字")
@@ -190,7 +187,7 @@ def send_to_lineworks(message):
 
 
 def send_alert_to_shincho(message):
-    """院長へDMでアラートを送る（エラー通知用）"""
+    """院長へDMでアラートを送る"""
     try:
         access_token = get_lw_access_token()
         headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
@@ -214,9 +211,10 @@ def main():
     print(f"朝練Bot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')} JST")
 
     MAX_ATTEMPTS = 6
-    RETRY_INTERVAL = 3600  # 1時間
+    RETRY_INTERVAL = 3600      # 1時間
+    ALERT_AFTER_ATTEMPTS = 2   # 2回失敗したら1度だけアラート送信
     today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
-    no_file_count = 0
+    alert_sent = False
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         now_jst = datetime.now(JST)
@@ -224,10 +222,21 @@ def main():
 
         file_id, title = find_latest_asaren()
         if not file_id:
-            no_file_count += 1
             print("朝練ファイルが見つかりません")
+
+            # 2回失敗したら1度だけアラートを送る
+            if attempt >= ALERT_AFTER_ATTEMPTS and not alert_sent:
+                alert = (
+                    f"【朝練Bot】{today} の朝練ファイルがPLAUDで見つかりません。\n\n"
+                    "朝練がある場合はPLAUDをアップロードしてください。\n"
+                    "アップロードされ次第、自動で歯科医師チャンネルに投稿します。\n\n"
+                    "本日朝練がない場合はこのメッセージは無視してください。"
+                )
+                send_alert_to_shincho(alert)
+                alert_sent = True
+                print("アラート送信済み。引き続き検索を続けます...")
+
             if attempt < MAX_ATTEMPTS:
-                print("1時間後に再試行します...")
                 time.sleep(RETRY_INTERVAL)
             continue
 
@@ -238,7 +247,6 @@ def main():
         if not summary:
             print("要約がまだ生成されていません")
             if attempt < MAX_ATTEMPTS:
-                print("1時間後に再試行します...")
                 time.sleep(RETRY_INTERVAL)
             continue
 
@@ -251,19 +259,14 @@ def main():
         append_to_google_docs(title, summary, share_url)
         lw_message = f"【朝練議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
         send_to_lineworks(lw_message)
+
+        if alert_sent:
+            send_alert_to_shincho(f"✅ 朝練議事録を歯科医師チャンネルに投稿しました。\n{title}")
+
         print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
         return
 
-    # 全リトライ失敗 → 院長にDMで通知
-    if no_file_count == MAX_ATTEMPTS:
-        # 1回もファイルが見つからなかった = アップロード忘れの可能性が高い
-        alert = f"【朝練Bot】{today} の朝練ファイルがPLAUDに見つかりませんでした。\n\nPLAUDへのアップロードをご確認ください。\nアップロード後は GitHub Actions の「朝練Bot」を手動実行すると投稿できます。"
-    else:
-        # ファイルはあるが要約が生成されなかった
-        alert = f"【朝練Bot】{today} の朝練要約が6時間待っても生成されませんでした。\n\nPLAUDのAI要約の状態をご確認ください。"
-
-    print(f"ERROR: {MAX_ATTEMPTS}回試みましたが失敗しました")
-    send_alert_to_shincho(alert)
+    print(f"{MAX_ATTEMPTS}回試みましたが朝練ファイルが見つかりませんでした（本日朝練なしの可能性）")
 
 
 if __name__ == "__main__":
