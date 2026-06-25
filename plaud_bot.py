@@ -21,6 +21,7 @@ LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID          = "12266491"
 LW_JIKU_CH         = os.environ["LW_JIKU_CH"]
 LW_PRIVATE_KEY     = os.environ["LW_PRIVATE_KEY"]
+LW_SHINCHO_ID      = "shin@ovalcourtdental"
 
 
 # ========================
@@ -187,6 +188,23 @@ def send_to_lineworks(message):
     print("LINE WORKS送信完了")
 
 
+def send_alert_to_shincho(message):
+    """院長へDMでアラートを送る"""
+    try:
+        access_token = get_lw_access_token()
+        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        r = requests.post(
+            f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
+            headers=headers,
+            json={"content": {"type": "text", "text": message}},
+            timeout=30
+        )
+        r.raise_for_status()
+        print("院長へアラート送信完了")
+    except Exception as e:
+        print(f"アラート送信失敗: {e}")
+
+
 # ========================
 # Main
 # ========================
@@ -194,30 +212,62 @@ def send_to_lineworks(message):
 def main():
     print(f"軸MTG Bot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
 
-    file_id, title = find_latest_jiku_mtg()
-    if not file_id:
-        print("ERROR: 軸MTGファイルが見つかりません")
+    MAX_ATTEMPTS       = 6
+    RETRY_INTERVAL     = 3600
+    ALERT_AFTER_ATTEMPTS = 2
+    today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
+    alert_sent = False
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        now_jst = datetime.now(JST)
+        print(f"\n--- 試行 {attempt}/{MAX_ATTEMPTS}: {now_jst.strftime('%H:%M')} JST ---")
+
+        file_id, title = find_latest_jiku_mtg()
+        if not file_id:
+            print("軸MTGファイルが見つかりません")
+
+            if attempt >= ALERT_AFTER_ATTEMPTS and not alert_sent:
+                alert = (
+                    f"【軸MTGBot】{today} の軸MTGファイルがPLAUDで見つかりません。\n\n"
+                    "録音がある場合はPLAUDをアップロードしてください。\n"
+                    "アップロードされ次第、自動で軸チャンネルに投稿します。\n\n"
+                    "本日軸MTGがない場合はこのメッセージは無視してください。"
+                )
+                send_alert_to_shincho(alert)
+                alert_sent = True
+                print("アラート送信済み。引き続き検索を続けます...")
+
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(RETRY_INTERVAL)
+            continue
+
+        print(f"対象: {title}")
+        detail = get_file_detail(file_id)
+        summary = get_file_summary(detail)
+
+        if not summary:
+            print("要約がまだ生成されていません")
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(RETRY_INTERVAL)
+            continue
+
+        note_ids = get_note_ids(detail)
+        share_url = get_share_url(file_id, note_ids)
+        if not share_url:
+            print("ERROR: 共有URL取得失敗")
+            return
+
+        append_to_google_docs(title, summary, share_url)
+        lw_message = f"【軸MTG議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
+        send_to_lineworks(lw_message)
+
+        if alert_sent:
+            send_alert_to_shincho(f"✅ 軸MTG議事録を軸チャンネルに投稿しました。\n{title}")
+
+        print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
         return
-    print(f"対象: {title}")
 
-    detail = get_file_detail(file_id)
-    summary = get_file_summary(detail)
-    if not summary:
-        print("ERROR: 要約取得失敗")
-        return
-
-    note_ids = get_note_ids(detail)
-    share_url = get_share_url(file_id, note_ids)
-    if not share_url:
-        print("ERROR: 共有URL取得失敗")
-        return
-
-    append_to_google_docs(title, summary, share_url)
-
-    lw_message = f"【軸MTG議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
-    send_to_lineworks(lw_message)
-
-    print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{MAX_ATTEMPTS}回試みましたが軸MTGファイルが見つかりませんでした（本日軸MTGなしの可能性）")
 
 
 if __name__ == "__main__":
