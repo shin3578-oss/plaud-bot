@@ -5,7 +5,7 @@
 2. Google Docsに追記
 3. LINE WORKS Bot APIで「歯科医師」チャンネルに投稿
 """
-import json, gzip, requests, os, time, re
+import json, gzip, requests, os, sys, time, re
 from datetime import datetime, timezone, timedelta
 
 JST = timezone(timedelta(hours=9))
@@ -215,6 +215,7 @@ def main():
     ALERT_AFTER_ATTEMPTS = 2   # 2回失敗したら1度だけアラート送信
     today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
     alert_sent = False
+    found_but_no_summary = False
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         now_jst = datetime.now(JST)
@@ -246,6 +247,7 @@ def main():
 
         if not summary:
             print("要約がまだ生成されていません")
+            found_but_no_summary = True
             if attempt < MAX_ATTEMPTS:
                 time.sleep(RETRY_INTERVAL)
             continue
@@ -253,8 +255,10 @@ def main():
         note_ids = get_note_ids(detail)
         share_url = get_share_url(file_id, note_ids)
         if not share_url:
+            # 未投稿のまま「成功」で終わらせない（院長に知らせて失敗扱いにする）
             print("ERROR: 共有URL取得失敗")
-            return
+            send_alert_to_shincho(f"⚠️【朝練Bot】共有URLの取得に失敗し、投稿できませんでした。\n{title}")
+            sys.exit(1)
 
         append_to_google_docs(title, summary, share_url)
         lw_message = f"【朝練議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
@@ -267,6 +271,13 @@ def main():
         return
 
     print(f"{MAX_ATTEMPTS}回試みましたが朝練ファイルが見つかりませんでした（本日朝練なしの可能性）")
+    if found_but_no_summary:
+        # ファイルはあるのに要約が生成されないまま終わった＝投稿漏れ。黙って成功にしない
+        send_alert_to_shincho(
+            f"⚠️【朝練Bot】{today} の朝練ファイルは見つかりましたが、"
+            "要約が生成されず投稿できませんでした。PLAUD側を確認してください。"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
