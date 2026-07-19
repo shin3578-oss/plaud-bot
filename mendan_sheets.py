@@ -26,9 +26,11 @@ JST = timezone(timedelta(hours=9))
 PLAUD_API = "https://api-apne1.plaud.ai"
 SHEET_ID = os.environ.get("MENDAN_SHEET_ID", "11Zct4Knwz6ItPB1dmFIKz0Yx-ZEAbeZVp5LvWLx6D7A")
 DAYS_BACK = int(os.environ.get("MENDAN_DAYS_BACK", "60"))
+# 記録対象スタッフ（このフルネームの面談だけをシートに残す。院長指示で山本・若澤のみ）
+TARGET_STAFF = set(filter(None, os.environ.get("MENDAN_TARGET_STAFF", "山本心奈,若澤未羽").split(",")))
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
-HEADER = ["完了", "面談日", "担当", "やること", "期限", "要約", "PLAUDリンク", "録音ID"]
+HEADER = ["面談日", "要約", "その日決まったTODO", "PLAUDリンク", "録音ID"]
 
 # ---- PLAUDトークン（ローカルはplaud_storage.json、Actionsは環境変数） ----
 _token_file = Path(r"C:\Users\shin3\Desktop\AI\plaud_storage.json")
@@ -179,9 +181,8 @@ def analyze(summary):
     prompt = f"""次はスタッフとの職種面談の要約です。以下をJSONだけで出力してください（前後の説明文なし）。
 
 {{
-  "tanto": "面談担当者の名字。桑野か斉藤のどちらかが担当。要約から判断できれば「桑野」または「斉藤」、判断できなければ空文字",
-  "summary": "面談内容を150〜250字で簡潔にまとめた要約（敬体）",
-  "todos": [ {{ "task": "面談で決まった具体的なやること（1件ずつ）", "due": "期限が明示されていればYYYY-MM-DDや『次回まで』等、なければ空文字" }} ]
+  "summary": "面談内容を200〜350字で簡潔にまとめた要約（敬体）",
+  "todos": [ "面談で決まった具体的なやること（1件ずつ・短い文で）" ]
 }}
 
 やることが無ければ todos は空配列。憶測でやることを作らない。
@@ -198,9 +199,8 @@ def analyze(summary):
         data = json.loads(text)
     except Exception:
         # 抽出失敗時はPLAUD要約をそのまま・TODOなしで通す（黙って落とさない）
-        return {"tanto": "", "summary": summary[:250], "todos": []}
-    data.setdefault("tanto", "")
-    data.setdefault("summary", summary[:250])
+        return {"summary": summary[:350], "todos": []}
+    data.setdefault("summary", summary[:350])
     data.setdefault("todos", [])
     return data
 
@@ -214,9 +214,9 @@ def get_all_sheets(service):
 
 
 def get_existing_ids(service, tab_titles):
-    """全スタッフタブのH列（録音ID）を集める"""
+    """全スタッフタブのE列（録音ID）を集める"""
     ids = set()
-    ranges = [f"{t}!H2:H" for t in tab_titles if t != "説明"]
+    ranges = [f"{t}!E2:E" for t in tab_titles if t != "説明"]
     if not ranges:
         return ids
     resp = service.spreadsheets().values().batchGet(spreadsheetId=SHEET_ID, ranges=ranges).execute()
@@ -234,7 +234,7 @@ def ensure_tab(service, title, sheets_map):
     try:
         resp = service.spreadsheets().batchUpdate(
             spreadsheetId=SHEET_ID,
-            body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"columnCount": 8, "frozenRowCount": 1}}}}]},
+            body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"columnCount": 5, "frozenRowCount": 1}}}}]},
         ).execute()
         sid = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
     except Exception as e:
@@ -245,62 +245,48 @@ def ensure_tab(service, title, sheets_map):
     sheets_map[title] = sid
     # ヘッダー書き込み
     service.spreadsheets().values().update(
-        spreadsheetId=SHEET_ID, range=f"{title}!A1:H1",
+        spreadsheetId=SHEET_ID, range=f"{title}!A1:E1",
         valueInputOption="RAW", body={"values": [HEADER]},
     ).execute()
-    # ヘッダーを太字に、列幅調整（A列のチェックボックスは追記後に「書いた行だけ」へ適用する。
-    #  列全体に先付けするとA列が全行FALSE値で埋まり、appendが最終行を誤認するため）
-    service.spreadsheets().batchUpdate(
-        spreadsheetId=SHEET_ID,
-        body={"requests": [
-            {"repeatCell": {
-                "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1},
-                "cell": {"userEnteredFormat": {"textFormat": {"bold": True}, "backgroundColor": {"red": 0.85, "green": 0.9, "blue": 0.95}}},
-                "fields": "userEnteredFormat(textFormat,backgroundColor)"}},
-            {"updateDimensionProperties": {
-                "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 3, "endIndex": 4},
-                "properties": {"pixelSize": 260}, "fields": "pixelSize"}},
-            {"updateDimensionProperties": {
-                "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 6},
-                "properties": {"pixelSize": 400}, "fields": "pixelSize"}},
-        ]},
-    ).execute()
+    # 折り返し表示＋上揃え（全部見えるように）、ヘッダー太字、列幅調整
+    widths = {0: 95, 1: 560, 2: 420, 3: 115, 4: 115}  # 面談日/要約/TODO/リンク/録音ID
+    reqs = [
+        {"repeatCell": {
+            "range": {"sheetId": sid},
+            "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"}},
+            "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)"}},
+        {"repeatCell": {
+            "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1},
+            "cell": {"userEnteredFormat": {"textFormat": {"bold": True}, "backgroundColor": {"red": 0.85, "green": 0.9, "blue": 0.95}}},
+            "fields": "userEnteredFormat(textFormat,backgroundColor)"}},
+    ]
+    for col, px in widths.items():
+        reqs.append({"updateDimensionProperties": {
+            "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": col, "endIndex": col + 1},
+            "properties": {"pixelSize": px}, "fields": "pixelSize"}})
+    service.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": reqs}).execute()
     return sid
 
 
-def build_rows(date, tanto, analysis, share_url, rec_id):
+def build_rows(date, analysis, share_url, rec_id):
+    """1面談＝1行。その日決まったTODOは1セルに箇条書きでまとめる。"""
     todos = analysis.get("todos") or []
     summ = analysis.get("summary", "")
-    rows = []
-    if not todos:
-        rows.append([False, date, tanto, "", "", summ, share_url, rec_id])
-    else:
-        for i, td in enumerate(todos):
-            rows.append([
-                False, date, tanto, td.get("task", ""), td.get("due", ""),
-                summ if i == 0 else "", share_url if i == 0 else "", rec_id if i == 0 else "",
-            ])
-    return rows
+    tasks = []
+    for t in todos:
+        task = t.get("task", "") if isinstance(t, dict) else str(t)
+        if task.strip():
+            tasks.append(task.strip())
+    todo_text = "\n".join(f"・{t}" for t in tasks) if tasks else "―"
+    return [[date, summ, todo_text, share_url, rec_id]]
 
 
-def append_rows(service, title, rows, sheet_id):
-    resp = service.spreadsheets().values().append(
+def append_rows(service, title, rows):
+    service.spreadsheets().values().append(
         spreadsheetId=SHEET_ID, range=f"{title}!A1",
         valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
         body={"values": rows},
     ).execute()
-    # 追記した行のA列だけをチェックボックス化する
-    updated = resp.get("updates", {}).get("updatedRange", "")
-    m = re.search(r"![A-Z]+(\d+):[A-Z]+(\d+)$", updated)
-    if m:
-        start_row, end_row = int(m.group(1)), int(m.group(2))
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=SHEET_ID,
-            body={"requests": [{"setDataValidation": {
-                "range": {"sheetId": sheet_id, "startRowIndex": start_row - 1, "endRowIndex": end_row,
-                          "startColumnIndex": 0, "endColumnIndex": 1},
-                "rule": {"condition": {"type": "BOOLEAN"}, "showCustomUi": True}}}]},
-        ).execute()
 
 
 # ==============================
@@ -350,17 +336,19 @@ def main():
         if f["id"] in existing:
             continue
         try:
+            name = extract_name(f["title"])
+            if TARGET_STAFF and name not in TARGET_STAFF:
+                continue  # 対象外スタッフの面談は記録しない
             summary = get_summary(f["id"])
             if not summary:
                 print(f"  要約未生成→スキップ: {f['title']}")
                 continue
-            name = extract_name(f["title"])
             note_ids = get_note_ids(f["id"])
             share_url = get_share_url(f["id"], note_ids)
             analysis = analyze(summary)
-            rows = build_rows(f["date"], analysis.get("tanto", ""), analysis, share_url, f["id"])
-            sid = ensure_tab(service, name, sheets_map)
-            append_rows(service, name, rows, sid)
+            rows = build_rows(f["date"], analysis, share_url, f["id"])
+            ensure_tab(service, name, sheets_map)
+            append_rows(service, name, rows)
             n_todo = len(analysis.get("todos") or [])
             print(f"  追記[{name}] {f['date']} やること{n_todo}件: {f['title']}")
             added.append(f"{name}（{f['date']}・やること{n_todo}件）")
