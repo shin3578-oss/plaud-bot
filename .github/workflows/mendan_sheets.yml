@@ -1,0 +1,35 @@
+# ==========================================================
+# 【何をする】PLAUDの「面談（名前）」録音を、スタッフ別タブのスプレッドシートに
+#             時系列で自動記録。要約＋やること(TODO)をClaudeで抽出してチェックボックス付きで追記。
+# 【いつ動く】毎日 20:00｜Cron-job.org「面談記録シートBot」ジョブが起動
+# 【共有先】  院長・桑野さん・斉藤さん（軸コア）
+# ==========================================================
+name: 面談記録シートBot
+
+on:
+  workflow_dispatch:       # Cron-job.org から GitHub API 経由で起動
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: 面談記録シートBotを実行
+        env:
+          PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          CLAUDE_API_KEY:          ${{ secrets.CLAUDE_API_KEY }}
+          LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+        run: python mendan_sheets.py
