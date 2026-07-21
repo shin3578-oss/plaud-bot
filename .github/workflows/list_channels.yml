@@ -1,0 +1,44 @@
+# ==========================================================
+# 【何をする】Botが参加しているLINEワークスのトークルーム（チャンネル）ID一覧を
+#             ログに出力する。新しいルームにBotを招待した後、そのIDを特定するための
+#             管理用ワークフロー（定期実行なし・手動のみ）
+# 【いつ動く】手動実行のみ（Cron-job.orgジョブなし）
+# ==========================================================
+name: LINEワークス チャンネルID一覧（管理用）
+
+on:
+  workflow_dispatch:
+
+jobs:
+  list-channels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 必要パッケージをインストール
+        run: pip install requests PyJWT cryptography
+
+      - name: チャンネル一覧を取得
+        env:
+          LW_PRIVATE_KEY: ${{ secrets.LW_PRIVATE_KEY }}
+        run: |
+          python - <<'EOF'
+          import os, time, requests
+          import jwt as pyjwt
+          CLIENT_ID = "0cAEPO2Yzau80tSsEhxV"
+          CLIENT_SECRET = "d7WfxxO2t1"
+          now = int(time.time())
+          assertion = pyjwt.encode(
+              {"iss": CLIENT_ID, "sub": "3w266.serviceaccount@ovalcourtdental",
+               "iat": now, "exp": now + 3600},
+              os.environ["LW_PRIVATE_KEY"], algorithm="RS256")
+          r = requests.post("https://auth.worksmobile.com/oauth2/v2.0/token", data={
+              "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+              "assertion": assertion, "client_id": CLIENT_ID,
+              "client_secret": CLIENT_SECRET, "scope": "bot"}, timeout=30)
+          token = r.json()["access_token"]
+          r2 = requests.get("https://www.worksapis.com/v1.0/bots/12266491/channels?limit=100",
+                            headers={"Authorization": f"Bearer {token}"}, timeout=30)
+          print(f"status: {r2.status_code}")
+          print(r2.text)
+          EOF

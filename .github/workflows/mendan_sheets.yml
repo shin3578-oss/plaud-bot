@@ -1,13 +1,22 @@
 # ==========================================================
-# 【何をする】PLAUDの「面談（名前）」録音を、スタッフ別タブのスプレッドシートに
-#             時系列で自動記録。要約＋やること(TODO)をClaudeで抽出してチェックボックス付きで追記。
-# 【いつ動く】毎日 20:00｜Cron-job.org「面談記録シートBot」ジョブが起動
-# 【共有先】  院長・桑野さん・斉藤さん（軸コア）
+# 【何をする】①面談記録シートBot: PLAUDの「面談（名前）」録音を、スタッフ別タブの
+#             スプレッドシートに時系列で自動記録。要約＋やること(TODO)をClaudeで抽出。
+#            ②PLAUD配信Bot(share_bot.py): 録音タイトルをトリガーにPLAUD要約リンクを配信
+#             （面談（桑野）→桑野さんDM／面談（斉藤）→斉藤さんDM／事務MTG→事務ルーム）。
+#             予定曜日（木=事務MTG・金=面談（桑野））に録音が無ければ院長DMへアラート。
+# 【いつ動く】月〜土 21:00｜apotoolの sync_consult.yml から連鎖dispatchで起動
+#            （Cron-job.orgは12件で満杯のため専用ジョブは作らず相乗り）
+# 【共有先】  ①院長・桑野さん・斉藤さん（軸コア）②各配信先＋アラートは院長DM
 # ==========================================================
 name: 面談記録シートBot
 
 on:
   workflow_dispatch:       # Cron-job.org から GitHub API 経由で起動
+    inputs:
+      share_mode:
+        description: "配信Botのモード（空=本番 / test=全メッセージを院長DMのみに送る）"
+        required: false
+        default: ""
 
 jobs:
   run-bot:
@@ -33,3 +42,13 @@ jobs:
           CLAUDE_API_KEY:          ${{ secrets.CLAUDE_API_KEY }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
         run: python mendan_sheets.py
+
+      - name: PLAUD配信Botを実行（面談・事務MTGのリンク配信）
+        if: always()    # シートBotが失敗しても配信は実行する
+        env:
+          PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_JIMU_CH:              ${{ secrets.LW_JIMU_CH }}
+          SHARE_MODE:              ${{ inputs.share_mode }}
+        run: python share_bot.py
