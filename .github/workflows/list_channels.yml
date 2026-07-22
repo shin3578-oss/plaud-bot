@@ -21,6 +21,7 @@ jobs:
       - name: チャンネル一覧を取得
         env:
           LW_PRIVATE_KEY: ${{ secrets.LW_PRIVATE_KEY }}
+          LW_JIMU_CH:     ${{ secrets.LW_JIMU_CH }}
         run: |
           python - <<'EOF'
           import os, time, requests
@@ -39,6 +40,13 @@ jobs:
           token = r.json()["access_token"]
           r2 = requests.get("https://www.worksapis.com/v1.0/bots/12266491/channels?limit=100",
                             headers={"Authorization": f"Bearer {token}"}, timeout=30)
-          print(f"status: {r2.status_code}")
+          print(f"一覧API status: {r2.status_code}")
           print(r2.text)
+          # 事務ルームID（LW_JIMU_CH）が有効かを読み取りだけで検証（メッセージは送らない）
+          ch = os.environ.get("LW_JIMU_CH", "")
+          if ch:
+              r3 = requests.get(f"https://www.worksapis.com/v1.0/bots/12266491/channels/{ch}",
+                                headers={"Authorization": f"Bearer {token}"}, timeout=30)
+              print(f"LW_JIMU_CH検証 status: {r3.status_code}")
+              print(r3.text)
           EOF
