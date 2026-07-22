@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 PLAUD配信Bot - 録音タイトルをトリガーに、PLAUD要約の共有リンクをLINEワークスへ自動配信
-  - 「面談（桑野）」→ 桑野碧さんの個人DM（金曜14時〜の面談。当日夜に配信）
-  - 「面談（斉藤）」→ 斉藤愛莉さんの個人DM（不定期）
+  - 「面談（○○）」→ ○○さんの個人DMへ自動配信（STAFF_DMで名前→アカウントIDを解決）
+      例: 面談（桑野）→桑野碧さんDM／面談（斉藤）→斉藤さんDM／面談（山本）→山本さんDM
+      名字だけの「桑野」は桑野碧さん。桑野莉緒さんはフルネーム「面談（桑野莉緒）」で書き分け
+      STAFF_DMに無い名前は配信せず院長DMへアラート（名前を追加するまで毎日通知）
   - 「事務MTG」    → 事務トークルーム（木曜。LW_JIMU_CH未設定の間はスキップ）
   - 朝練Bot・軸MTGBotと同じ方式（PLAUD要約リンクを投稿。文字起こし・音声は非表示）
 
@@ -52,21 +54,47 @@ LW_JIMU_CH = os.environ.get("LW_JIMU_CH", "")  # 事務トークルームID（Bo
 
 # ==============================
 # 配信ルート定義
-#   match   : タイトル先頭一致（半角カッコは全角に正規化してから判定）
-#   dest    : ("user", アカウントID) or ("channel", チャンネルID)
-#   header  : 通知メッセージの見出し（【タスク名】ルール）
-#   expect_weekday : この曜日(月=0)に録音が無ければ院長へアラート。Noneは不定期
+#   タイトル先頭「面談（○○）」→ ○○さんの個人DM（STAFF_DMで解決）
+#   タイトル先頭「事務MTG」   → 事務トークルーム
 # ==============================
-ROUTES = [
-    {"key": "mendan_kuwano", "match": "面談（桑野）",
-     "dest": ("user", "ov.46600@ovalcourtdental"),  # 桑野碧さん
-     "dest_label": "桑野さんDM", "header": "【面談議事録】", "expect_weekday": 4},   # 金曜
-    {"key": "mendan_saito", "match": "面談（斉藤）",
-     "dest": ("user", "ov.20438@ovalcourtdental"),  # 斉藤愛莉さん
-     "dest_label": "斉藤さんDM", "header": "【面談議事録】", "expect_weekday": None},  # 不定期
-    {"key": "jimu_mtg", "match": "事務MTG",
-     "dest": ("channel", LW_JIMU_CH),
-     "dest_label": "事務ルーム", "header": "【事務MTG議事録】", "expect_weekday": 3},  # 木曜
+JIMU_ROUTE = {"key": "jimu_mtg", "match": "事務MTG",
+              "dest": ("channel", LW_JIMU_CH),
+              "dest_label": "事務ルーム", "header": "【事務MTG議事録】"}
+
+# 面談（○○）の○○ → (表示ラベル, LINEワークスアカウントID)
+# 名字だけの「桑野」は桑野碧さん（DH軸・金曜面談の慣例）。桑野莉緒さんはフルネームで書き分け
+STAFF_DM = {
+    "桑野":     ("桑野さんDM",     "ov.46600@ovalcourtdental"),
+    "桑野碧":   ("桑野碧さんDM",   "ov.46600@ovalcourtdental"),
+    "桑野莉緒": ("桑野莉緒さんDM", "ov.66543@ovalcourtdental"),
+    "斉藤":     ("斉藤さんDM",     "ov.20438@ovalcourtdental"),
+    "斎藤":     ("斉藤さんDM",     "ov.20438@ovalcourtdental"),
+    "齋藤":     ("斉藤さんDM",     "ov.20438@ovalcourtdental"),
+    "篠宮":     ("シノDM",         "asukasama23@ovalcourtdental"),
+    "シノ":     ("シノDM",         "asukasama23@ovalcourtdental"),
+    "田口":     ("田口さんDM",     "ov.82954@ovalcourtdental"),
+    "内藤":     ("内藤さんDM",     "ov.28224@ovalcourtdental"),
+    "若澤":     ("若澤さんDM",     "ov.42352@ovalcourtdental"),
+    "荊木":     ("荊木さんDM",     "ov.26804@ovalcourtdental"),
+    "山本":     ("山本さんDM",     "ov.63563@ovalcourtdental"),
+    "重野":     ("重野さんDM",     "ov.02757@ovalcourtdental"),
+    "小西":     ("小西さんDM",     "ov.04694@ovalcourtdental"),
+    "森":       ("森さんDM",       "ov.38270@ovalcourtdental"),
+    "石川":     ("石川さんDM",     "ishikawa.mari@ovalcourtdental"),
+    "村田":     ("村田さんDM",     "129847711@ovalcourtdental"),
+    "竹内":     ("竹内さんDM",     "ov.04678@ovalcourtdental"),
+    "秋野":     ("秋野先生DM",     "ov.99552@ovalcourtdental"),
+    "渡邉":     ("渡邉先生DM",     "ov.23431@ovalcourtdental"),
+    "渡辺":     ("渡邉先生DM",     "ov.23431@ovalcourtdental"),
+    "納冨":     ("納冨先生DM",     "ov.47745@ovalcourtdental"),
+    "濱":       ("濱先生DM",       "hamayoshihiro@ovalcourtdental"),
+    "浜":       ("濱先生DM",       "hamayoshihiro@ovalcourtdental"),
+}
+
+# この曜日(月=0)に録音が無ければ院長へアラート（斉藤さんは不定期なので対象外）
+EXPECTED_RECORDINGS = [
+    {"weekday": 4, "prefix": "面談（桑野", "display": "面談（桑野）", "label": "桑野さんDM"},   # 金曜
+    {"weekday": 3, "prefix": "事務MTG",   "display": "事務MTG",      "label": "事務ルーム"},   # 木曜
 ]
 
 WEEKDAY_JA = ["月", "火", "水", "木", "金", "土", "日"]
@@ -74,6 +102,22 @@ WEEKDAY_JA = ["月", "火", "水", "木", "金", "土", "日"]
 
 def norm(title):
     return title.replace("(", "（").replace(")", "）")
+
+
+def resolve_route(title):
+    """タイトルから配信ルートを決める。対象外はNone。面談だが宛先不明はunknown_name付きで返す"""
+    t = norm(title)
+    if t.startswith(JIMU_ROUTE["match"]):
+        return JIMU_ROUTE
+    m = re.match(r"^面談（\s*([^）]+?)\s*）", t)
+    if not m:
+        return None
+    name = m.group(1)
+    if name in STAFF_DM:
+        label, account = STAFF_DM[name]
+        return {"key": f"mendan_{name}", "match": f"面談（{name}）",
+                "dest": ("user", account), "dest_label": label, "header": "【面談議事録】"}
+    return {"key": "mendan_unknown", "unknown_name": name}
 
 
 # ==============================
@@ -94,11 +138,10 @@ def find_target_files():
         file_dt = datetime.fromtimestamp(f.get("start_time", 0) / 1000, tz=JST)
         if file_dt < cutoff:
             continue
-        for route in ROUTES:
-            if norm(title).startswith(route["match"]):
-                results.append({"id": f.get("id", ""), "title": title,
-                                "date": file_dt.strftime("%Y-%m-%d"), "route": route})
-                break
+        route = resolve_route(title)
+        if route:
+            results.append({"id": f.get("id", ""), "title": title,
+                            "date": file_dt.strftime("%Y-%m-%d"), "route": route})
     return sorted(results, key=lambda x: x["date"])
 
 
@@ -285,19 +328,23 @@ def main():
     # 初回実行: 既存録音は配信済み扱いで登録し、送信しない（過去分の一斉送信を防ぐ）
     if first_run:
         rows = [[f["id"], now.strftime("%Y-%m-%d %H:%M"), f["title"],
-                 f["route"]["dest_label"], "初期化（送信なし）"] for f in files]
+                 f["route"].get("dest_label", "宛先不明"), "初期化（送信なし）"] for f in files]
         # マーカー行を必ず入れてログを非空にする（0件初期化でも次回から本番配信になる）
         rows.append(["-", now.strftime("%Y-%m-%d %H:%M"), "（初期化完了マーカー）", "-", "初期化"])
         append_log(service, rows)
         print(f"初回実行: 既存{len(rows) - 1}件を配信済み登録（送信なし）。次回から新規録音を配信します")
         return
 
-    sent, pending, errors = [], [], []
+    sent, pending, errors, unknowns = [], [], [], []
     log_rows = []
     for f in files:
         if f["id"] in sent_ids:
             continue
         route = f["route"]
+        if route.get("unknown_name"):
+            print(f"  宛先不明→院長へアラート: {f['title']}")
+            unknowns.append(f"・{f['title']}（「{route['unknown_name']}」がスタッフ一覧にありません）")
+            continue
         try:
             if route["dest"][0] == "channel" and not route["dest"][1]:
                 print(f"  スキップ（チャンネル未設定）: {f['title']}")
@@ -324,15 +371,15 @@ def main():
     append_log(service, log_rows)
 
     # 予定曜日なのに今日の録音が無い → 院長へアラート（斉藤さんは不定期なので対象外）
-    for route in ROUTES:
-        if route["expect_weekday"] != weekday:
+    for exp in EXPECTED_RECORDINGS:
+        if exp["weekday"] != weekday:
             continue
-        todays = [f for f in files if f["route"]["key"] == route["key"] and f["date"] == today]
+        todays = [f for f in files if norm(f["title"]).startswith(exp["prefix"]) and f["date"] == today]
         if not todays:
             notify_shincho(
-                f"【PLAUD配信Bot】本日（{WEEKDAY_JA[weekday]}曜）の「{route['match']}」の録音が"
+                f"【PLAUD配信Bot】本日（{WEEKDAY_JA[weekday]}曜）の「{exp['display']}」の録音が"
                 f"PLAUDに見つかりません。\n\n録音がある場合はPLAUDへアップロードしてください。"
-                f"明日以降の実行で見つかり次第、{route['dest_label']}へ自動配信します。\n"
+                f"明日以降の実行で見つかり次第、{exp['label']}へ自動配信します。\n"
                 f"本日実施がなかった場合はこのメッセージは無視してください。")
 
     # 要約未生成の録音 → 院長へ知らせて翌日再試行
@@ -340,7 +387,14 @@ def main():
         notify_shincho("【PLAUD配信Bot】録音は見つかりましたが、PLAUD要約が未生成のため配信できませんでした"
                        "（明日の実行で自動再試行します）。\n\n" + "\n".join(f"・{t}" for t in pending))
 
-    print(f"完了: 配信{len(sent)}件 / 要約待ち{len(pending)}件 / エラー{len(errors)}件")
+    # 面談（○○）の○○がスタッフ一覧に無い → 院長へアラート（配信しない）
+    if unknowns:
+        notify_shincho("【PLAUD配信Bot】面談の録音がありましたが、配信先のスタッフを特定できなかったため"
+                       "配信していません。\n\n" + "\n".join(unknowns)
+                       + "\n\n配信先に追加する場合は、その方の名前をAIに伝えてください"
+                       "（追加までは毎日この通知が出ます。録音から7日たつと対象外になります）。")
+
+    print(f"完了: 配信{len(sent)}件 / 要約待ち{len(pending)}件 / 宛先不明{len(unknowns)}件 / エラー{len(errors)}件")
     if errors:
         notify_shincho("⚠️【PLAUD配信Bot】一部の配信に失敗しました\n\n" + "\n".join(errors))
         sys.exit(1)
