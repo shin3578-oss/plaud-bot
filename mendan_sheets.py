@@ -27,7 +27,7 @@ PLAUD_API = "https://api-apne1.plaud.ai"
 SHEET_ID = os.environ.get("MENDAN_SHEET_ID", "11Zct4Knwz6ItPB1dmFIKz0Yx-ZEAbeZVp5LvWLx6D7A")
 DAYS_BACK = int(os.environ.get("MENDAN_DAYS_BACK", "60"))
 # 記録除外スタッフ（この人自身の面談はシートに残さない。院長指示2026-07-25:
-# 全スタッフの面談を記録する。ただしスプシを閲覧できる軸スタッフ本人の面談は除外）
+# 全スタッフの面談を記録する。桑野・斉藤本人の面談のみ対象外。スプシ共有は院長のみ）
 EXCLUDE_STAFF = set(filter(None, os.environ.get("MENDAN_EXCLUDE_STAFF", "桑野碧,斉藤愛莉").split(",")))
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
