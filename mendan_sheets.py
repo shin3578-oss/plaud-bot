@@ -26,8 +26,9 @@ JST = timezone(timedelta(hours=9))
 PLAUD_API = "https://api-apne1.plaud.ai"
 SHEET_ID = os.environ.get("MENDAN_SHEET_ID", "11Zct4Knwz6ItPB1dmFIKz0Yx-ZEAbeZVp5LvWLx6D7A")
 DAYS_BACK = int(os.environ.get("MENDAN_DAYS_BACK", "60"))
-# 記録対象スタッフ（このフルネームの面談だけをシートに残す。院長指示で山本・若澤のみ）
-TARGET_STAFF = set(filter(None, os.environ.get("MENDAN_TARGET_STAFF", "山本心奈,若澤未羽").split(",")))
+# 記録除外スタッフ（この人自身の面談はシートに残さない。院長指示2026-07-25:
+# 全スタッフの面談を記録する。ただしスプシを閲覧できる軸スタッフ本人の面談は除外）
+EXCLUDE_STAFF = set(filter(None, os.environ.get("MENDAN_EXCLUDE_STAFF", "桑野碧,斉藤愛莉").split(",")))
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 HEADER = ["面談日", "要約", "その日決まったTODO", "PLAUDリンク", "録音ID"]
@@ -337,8 +338,8 @@ def main():
             continue
         try:
             name = extract_name(f["title"])
-            if TARGET_STAFF and name not in TARGET_STAFF:
-                continue  # 対象外スタッフの面談は記録しない
+            if name in EXCLUDE_STAFF:
+                continue  # 軸スタッフ本人の面談は記録しない（本人がスプシを閲覧できるため）
             summary = get_summary(f["id"])
             if not summary:
                 print(f"  要約未生成→スキップ: {f['title']}")
