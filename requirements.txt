@@ -4,3 +4,4 @@ google-api-python-client
 PyJWT
 cryptography
 anthropic
+playwright
