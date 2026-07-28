@@ -25,6 +25,11 @@ from mendan_sheets import (JST, SHEET_ID, STAFF_MAP, HEADER, get_sheets_service,
 
 IMPORT_TAB = "シノ面談の取り込み"
 IMPORT_HEADER = ["PLAUD共有URL", "記録先スタッフ（空欄なら自動）", "取り込み日時", "結果"]
+# シノ用の投函箱（別スプシ）。院長スプシには機密面談が入っておりシノに共有できないため、
+# URLを貼るだけの専用スプシを分けている。シノ=編集可・Bot=編集可・院長=オーナー。
+INBOX_SHEET_ID = os.environ.get("SHINO_INBOX_SHEET_ID", "18lbbhXck1N3ZXVQMZ1DRP_xE91YtYxqd5IN7qnMFLT4")
+INBOX_TAB = "投函箱"
+INBOX_FIRST_ROW = 7  # 6行目までが説明とヘッダー
 # シノが実施した面談の行の色（白＝院長／緑＝幹部／青＝シノ）
 SHINO_BG = {"red": 0.85, "green": 0.91, "blue": 0.97}
 
@@ -151,10 +156,95 @@ def guess_staff(title, text):
     return ""
 
 
+def sync_from_inbox(service):
+    """シノの投函箱に貼られたURLを、院長スプシの取り込みタブへ転記する。
+    投函箱には面談の中身を書き戻さない（シノが他スタッフの記録を見られないようにするため、
+    成否だけを返す）。"""
+    try:
+        inbox = service.spreadsheets().values().get(
+            spreadsheetId=INBOX_SHEET_ID,
+            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute().get("values", [])
+    except Exception as e:
+        print(f"  投函箱を読めませんでした: {e}")
+        return
+    if not inbox:
+        return
+    cur = service.spreadsheets().values().get(
+        spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:A").execute().get("values", [])
+    have = {r[0].strip() for r in cur if r and r[0].strip()}
+
+    add, marks = [], []
+    for i, r in enumerate(inbox):
+        url = r[0].strip() if r else ""
+        if not url.startswith("http"):
+            continue
+        name = r[1].strip() if len(r) > 1 else ""
+        if url in have:
+            if not (len(r) > 2 and r[2].strip()):
+                marks.append((i + INBOX_FIRST_ROW, "受け取りました"))
+            continue
+        add.append([url, name])
+        have.add(url)
+        marks.append((i + INBOX_FIRST_ROW, "受け取りました"))
+
+    if add:
+        service.spreadsheets().values().append(
+            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4",
+            valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
+            body={"values": add}).execute()
+        print(f"  投函箱から{len(add)}件を受け取りました")
+    if marks:
+        service.spreadsheets().values().batchUpdate(spreadsheetId=INBOX_SHEET_ID, body={
+            "valueInputOption": "USER_ENTERED",
+            "data": [{"range": f"{INBOX_TAB}!C{n}", "values": [[m]]} for n, m in marks]}).execute()
+
+
+def writeback_to_inbox(service):
+    """取り込み結果を投函箱のC列へ返す。シノが自分で直せるように、
+    「名前が分かりません」だけは具体的に伝える。面談の中身は返さない。"""
+    try:
+        inbox = service.spreadsheets().values().get(
+            spreadsheetId=INBOX_SHEET_ID,
+            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute().get("values", [])
+        done = service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute().get("values", [])
+    except Exception as e:
+        print(f"  投函箱への結果反映をスキップ: {e}")
+        return
+    status = {r[0].strip(): (r[3] if len(r) > 3 else "") for r in done if r and r[0].strip()}
+    data = []
+    for i, r in enumerate(inbox):
+        url = r[0].strip() if r else ""
+        if not url:
+            continue
+        s = status.get(url, "")
+        if not s:
+            continue
+        if s.startswith("✅"):
+            msg = "✅ 記録しました"
+        elif "スタッフ名" in s:
+            msg = "⚠ 誰の面談か分かりませんでした→B列に氏名を書いてください"
+        elif s.startswith("対象外"):
+            msg = "対象外（面接・セミナー・会議は記録しません）"
+        elif s.startswith("済"):
+            msg = "✅ 記録済み"
+        else:
+            msg = "⚠ 読み取れませんでした（リンクが無効か期限切れかもしれません）"
+        if (len(r) > 2 and r[2].strip()) != msg:
+            data.append({"range": f"{INBOX_TAB}!C{i + INBOX_FIRST_ROW}", "values": [[msg]]})
+    if data:
+        service.spreadsheets().values().batchUpdate(spreadsheetId=INBOX_SHEET_ID, body={
+            "valueInputOption": "USER_ENTERED", "data": data}).execute()
+        print(f"  投函箱に結果を{len(data)}件返しました")
+
+
 def main():
     print(f"シノ面談 取り込みBot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
     service = get_sheets_service()
     ensure_import_tab(service)
+
+    # ① シノの投函箱に貼られたURLを院長スプシの取り込みタブへ転記（未転記分のみ）
+    sync_from_inbox(service)
 
     rows = service.spreadsheets().values().get(
         spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute().get("values", [])
@@ -162,6 +252,7 @@ def main():
             if r and r[0].strip().startswith("http") and not (len(r) > 2 and r[2].strip())]
     print(f"未取り込みのURL: {len(todo)}件")
     if not todo:
+        writeback_to_inbox(service)   # 新規が無くても、前回分の結果は投函箱へ返す
         return
 
     sheets_map = get_all_sheets(service, SHEET_ID)
@@ -218,6 +309,7 @@ def main():
     service.spreadsheets().values().batchUpdate(spreadsheetId=SHEET_ID, body={
         "valueInputOption": "USER_ENTERED",
         "data": [{"range": f"{IMPORT_TAB}!C{n}:D{n}", "values": [[now, msg]]} for n, msg in results]}).execute()
+    writeback_to_inbox(service)   # シノにも結果を返す（中身は返さない）
 
     print(f"完了: 新規{len(added)}件")
     if added:
