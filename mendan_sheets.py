@@ -31,6 +31,17 @@ DAYS_BACK = int(os.environ.get("MENDAN_DAYS_BACK", "60"))
 EXCLUDE_STAFF = set(filter(None, os.environ.get("MENDAN_EXCLUDE_STAFF", "桑野碧,斉藤愛莉").split(",")))
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
+# ---- 幹部シェア用スプシ（院長指示2026-07-28）----
+# 幹部（桑野・斉藤）が実施した面談だけを、幹部が閲覧できる別スプシにも記録する。
+# 院長が実施した面談（例: 水曜の田口さんとの面談）は機密のため絶対にこちらへ入れない。
+# 見分けはPLAUDの録音タイトルの接頭辞のみで行う＝印が無いものは幹部側へ流れない安全設計。
+KANBU_SHEET_ID = os.environ.get("MENDAN_KANBU_SHEET_ID", "1_WoiIeYFlG3RE30qm2aFwW3C7sgivPSC7iyQpzzPm7Y")
+KANBU_PREFIX = "幹部面談"
+# 幹部シェア用に載せてよいスタッフ（ホワイトリスト。ここに無い人は幹部スプシに記録しない）
+KANBU_STAFF = set(filter(None, os.environ.get(
+    "MENDAN_KANBU_STAFF",
+    "田口咲奈,小西瑛子,石川真里,山本心奈,若澤未羽,内藤友菜,森はるか,竹内由佳,重野茜").split(",")))
+
 HEADER = ["面談日", "要約", "その日決まったTODO", "PLAUDリンク", "録音ID"]
 
 # ---- PLAUDトークン（ローカルはplaud_storage.json、Actionsは環境変数） ----
@@ -95,13 +106,15 @@ def find_mendan_files():
     results = []
     for f in r.json().get("data_file_list", []):
         title = f.get("filename", "") or f.get("title", "")
-        # 面談のみ対象（面接=採用は除外）
-        if not (title.startswith("面談（") or title.startswith("面談(")):
+        # 「面談（…）」＝院長実施 / 「幹部面談（…）」＝幹部実施。面接(採用)は対象外
+        is_kanbu = title.startswith(f"{KANBU_PREFIX}（") or title.startswith(f"{KANBU_PREFIX}(")
+        if not (is_kanbu or title.startswith("面談（") or title.startswith("面談(")):
             continue
         file_dt = datetime.fromtimestamp(f.get("start_time", 0) / 1000, tz=JST)
         if file_dt < cutoff:
             continue
-        results.append({"id": f.get("id", ""), "title": title, "date": file_dt.strftime("%Y-%m-%d")})
+        results.append({"id": f.get("id", ""), "title": title,
+                        "date": file_dt.strftime("%Y-%m-%d"), "is_kanbu": is_kanbu})
     return results
 
 
@@ -162,7 +175,8 @@ def get_share_url(file_id, note_ids):
 
 
 def extract_name(title):
-    m = re.match(r"面談[（(]([^）)]+)[）)]", title)
+    # 「面談（田口）…」「幹部面談（田口）…」どちらからも名前を取る
+    m = re.match(r"(?:幹部)?面談[（(]([^）)]+)[）)]", title)
     raw = m.group(1) if m else ""
     if raw:
         for key in sorted(STAFF_MAP.keys(), key=len, reverse=True):
@@ -209,18 +223,18 @@ def analyze(summary):
 # ==============================
 # Sheets 操作
 # ==============================
-def get_all_sheets(service):
-    meta = service.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+def get_all_sheets(service, ssid=None):
+    meta = service.spreadsheets().get(spreadsheetId=ssid or SHEET_ID).execute()
     return {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta["sheets"]}
 
 
-def get_existing_ids(service, tab_titles):
+def get_existing_ids(service, tab_titles, ssid=None):
     """全スタッフタブのE列（録音ID）を集める"""
     ids = set()
-    ranges = [f"{t}!E2:E" for t in tab_titles if t != "説明"]
+    ranges = [f"{t}!E2:E" for t in tab_titles if t not in ("説明", "配信ログ")]
     if not ranges:
         return ids
-    resp = service.spreadsheets().values().batchGet(spreadsheetId=SHEET_ID, ranges=ranges).execute()
+    resp = service.spreadsheets().values().batchGet(spreadsheetId=ssid or SHEET_ID, ranges=ranges).execute()
     for vr in resp.get("valueRanges", []):
         for row in vr.get("values", []):
             if row and row[0].strip():
@@ -228,25 +242,26 @@ def get_existing_ids(service, tab_titles):
     return ids
 
 
-def ensure_tab(service, title, sheets_map):
+def ensure_tab(service, title, sheets_map, ssid=None):
+    ssid = ssid or SHEET_ID
     if title in sheets_map:
         return sheets_map[title]
     # タブ追加（既に存在していたら最新のシート一覧から拾い直す＝競合・部分状態に耐性）
     try:
         resp = service.spreadsheets().batchUpdate(
-            spreadsheetId=SHEET_ID,
+            spreadsheetId=ssid,
             body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"columnCount": 5, "frozenRowCount": 1}}}}]},
         ).execute()
         sid = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
     except Exception as e:
         if "すでに存在" in str(e) or "already exists" in str(e):
-            sheets_map.update(get_all_sheets(service))
+            sheets_map.update(get_all_sheets(service, ssid))
             return sheets_map[title]
         raise
     sheets_map[title] = sid
     # ヘッダー書き込み
     service.spreadsheets().values().update(
-        spreadsheetId=SHEET_ID, range=f"{title}!A1:E1",
+        spreadsheetId=ssid, range=f"{title}!A1:E1",
         valueInputOption="RAW", body={"values": [HEADER]},
     ).execute()
     # 折り返し表示＋上揃え（全部見えるように）、ヘッダー太字、列幅調整
@@ -265,7 +280,7 @@ def ensure_tab(service, title, sheets_map):
         reqs.append({"updateDimensionProperties": {
             "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": col, "endIndex": col + 1},
             "properties": {"pixelSize": px}, "fields": "pixelSize"}})
-    service.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": reqs}).execute()
+    service.spreadsheets().batchUpdate(spreadsheetId=ssid, body={"requests": reqs}).execute()
     return sid
 
 
@@ -282,12 +297,12 @@ def build_rows(date, analysis, share_url, rec_id):
     return [[date, summ, todo_text, share_url, rec_id]]
 
 
-def sort_tab_desc(service, sheet_id):
+def sort_tab_desc(service, sheet_id, ssid=None):
     """面談日（A列）で降順ソート＝最新の面談が常に一番上。
     PLAUDの取得順やバックフィルの都合で行が前後しても、追記のたびにここで整列する。
     空行は常に末尾に送られるため、行数の増減や手動追記があっても壊れない。"""
     service.spreadsheets().batchUpdate(
-        spreadsheetId=SHEET_ID,
+        spreadsheetId=ssid or SHEET_ID,
         body={"requests": [{"sortRange": {
             "range": {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 5},
             "sortSpecs": [{"dimensionIndex": 0, "sortOrder": "DESCENDING"}],
@@ -295,9 +310,9 @@ def sort_tab_desc(service, sheet_id):
     ).execute()
 
 
-def append_rows(service, title, rows):
+def append_rows(service, title, rows, ssid=None):
     service.spreadsheets().values().append(
-        spreadsheetId=SHEET_ID, range=f"{title}!A1",
+        spreadsheetId=ssid or SHEET_ID, range=f"{title}!A1",
         valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
         body={"values": rows},
     ).execute()
@@ -337,45 +352,69 @@ def main():
         sys.exit(1)
 
     service = get_sheets_service()
-    sheets_map = get_all_sheets(service)
-    existing = get_existing_ids(service, list(sheets_map.keys()))
-    print(f"記録済み録音ID: {len(existing)}件")
+
+    # 院長スプシ（全面談）と幹部シェア用スプシ（幹部実施の面談のみ）の2冊を扱う
+    books = {
+        "院長": {"ssid": SHEET_ID},
+        "幹部": {"ssid": KANBU_SHEET_ID},
+    }
+    for label, b in books.items():
+        b["map"] = get_all_sheets(service, b["ssid"])
+        b["existing"] = get_existing_ids(service, list(b["map"].keys()), b["ssid"])
+        print(f"記録済み録音ID[{label}]: {len(b['existing'])}件")
 
     files = find_mendan_files()
-    print(f"PLAUD面談ファイル: {len(files)}件（過去{DAYS_BACK}日）")
+    n_kanbu = sum(1 for f in files if f["is_kanbu"])
+    print(f"PLAUD面談ファイル: {len(files)}件（うち幹部面談{n_kanbu}件・過去{DAYS_BACK}日）")
 
-    added = []
+    added = {"院長": [], "幹部": []}
     errors = []
     for f in files:
-        if f["id"] in existing:
-            continue
         try:
             name = extract_name(f["title"])
-            if name in EXCLUDE_STAFF:
-                continue  # 軸スタッフ本人の面談は記録しない（本人がスプシを閲覧できるため）
+            # このファイルをどの本に書くか決める
+            #   院長スプシ: 全面談（ただし桑野・斉藤本人の面談は除外）
+            #   幹部スプシ: 「幹部面談（…）」かつホワイトリストのスタッフのみ
+            targets = []
+            if name not in EXCLUDE_STAFF and f["id"] not in books["院長"]["existing"]:
+                targets.append("院長")
+            if f["is_kanbu"] and name in KANBU_STAFF and f["id"] not in books["幹部"]["existing"]:
+                targets.append("幹部")
+            if not targets:
+                continue
+
             summary = get_summary(f["id"])
             if not summary:
                 print(f"  要約未生成→スキップ: {f['title']}")
                 continue
             note_ids = get_note_ids(f["id"])
             share_url = get_share_url(f["id"], note_ids)
-            analysis = analyze(summary)
+            analysis = analyze(summary)  # 要約整形は1回だけ実行して両方に使い回す
             rows = build_rows(f["date"], analysis, share_url, f["id"])
-            sid = ensure_tab(service, name, sheets_map)
-            append_rows(service, name, rows)
-            sort_tab_desc(service, sid)  # 追記のたびに面談日の降順へ整列（最新が一番上）
             n_todo = len(analysis.get("todos") or [])
-            print(f"  追記[{name}] {f['date']} やること{n_todo}件: {f['title']}")
-            added.append(f"{name}（{f['date']}・やること{n_todo}件）")
+
+            for label in targets:
+                b = books[label]
+                sid = ensure_tab(service, name, b["map"], b["ssid"])
+                append_rows(service, name, rows, b["ssid"])
+                sort_tab_desc(service, sid, b["ssid"])  # 追記のたびに面談日の降順へ整列（最新が一番上）
+                print(f"  追記[{label}／{name}] {f['date']} やること{n_todo}件: {f['title']}")
+                added[label].append(f"{name}（{f['date']}・やること{n_todo}件）")
         except Exception as e:
             print(f"  ERROR {f['title']}: {e}")
             errors.append(f"{f['title']}: {e}")
 
-    print(f"完了: 新規{len(added)}件 / エラー{len(errors)}件")
+    print(f"完了: 院長{len(added['院長'])}件 / 幹部{len(added['幹部'])}件 / エラー{len(errors)}件")
 
-    if added:
-        msg = "【面談記録】新しい面談を記録しました\n\n" + "\n".join(f"・{a}" for a in added)
-        msg += f"\n\nhttps://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+    if added["院長"] or added["幹部"]:
+        msg = "【面談記録】新しい面談を記録しました\n"
+        if added["院長"]:
+            msg += "\n■ 院長シート\n" + "\n".join(f"・{a}" for a in added["院長"])
+            msg += f"\nhttps://docs.google.com/spreadsheets/d/{SHEET_ID}/edit\n"
+        if added["幹部"]:
+            msg += "\n■ 幹部シェア用シート（桑野さん・斉藤さんが閲覧できます）\n"
+            msg += "\n".join(f"・{a}" for a in added["幹部"])
+            msg += f"\nhttps://docs.google.com/spreadsheets/d/{KANBU_SHEET_ID}/edit"
         notify_shincho(msg)
     if errors:
         notify_shincho("⚠️【面談記録】一部の面談が記録できませんでした\n\n" + "\n".join(errors))
