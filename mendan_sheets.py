@@ -41,6 +41,8 @@ KANBU_PREFIX = "幹部面談"
 KANBU_STAFF = set(filter(None, os.environ.get(
     "MENDAN_KANBU_STAFF",
     "田口咲奈,小西瑛子,石川真里,山本心奈,若澤未羽,内藤友菜,森はるか,竹内由佳,重野茜").split(",")))
+# 院長スプシの行の色分け：幹部が実施した面談＝薄い緑／院長が実施した面談＝白
+KANBU_BG = {"red": 0.87, "green": 0.95, "blue": 0.87}
 
 HEADER = ["面談日", "要約", "その日決まったTODO", "PLAUDリンク", "録音ID"]
 
@@ -189,10 +191,11 @@ def extract_name(title):
 # ==============================
 # Claude: 要約整形 ＋ やること抽出 ＋ 面談担当推定
 # ==============================
-def analyze(summary):
+def analyze(summary, staff_name=""):
     import anthropic
     api_key = os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
     client = anthropic.Anthropic(api_key=api_key)
+    who = f"この面談を受けたスタッフは「{staff_name}さん」です。\n" if staff_name else ""
     prompt = f"""次はスタッフとの職種面談の要約です。以下をJSONだけで出力してください（前後の説明文なし）。
 
 {{
@@ -200,16 +203,27 @@ def analyze(summary):
   "todos": [ "面談で決まった具体的なやること（1件ずつ・短い文で）" ]
 }}
 
+{who}元の要約には「Speaker 1」「Speaker 2」のような話者ラベルが混ざっていることがあります。
+出力にはこの話者ラベルを絶対に使わないでください。次のように書き換えます。
+- 面談を受けたスタッフ本人の発言 → 「{staff_name or '本人'}さん」または「本人」
+- 面談した側（院長・幹部）の発言 → 「面談者」
+- どちらの発言か確実に判断できないときは、主語を無理に決めず、決まったことや事実だけを書く（推測で人を当てはめない）
+
 やることが無ければ todos は空配列。憶測でやることを作らない。
 
 --- 面談要約 ---
 {summary[:6000]}"""
-    msg = client.messages.create(
-        model=CLAUDE_MODEL, max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = msg.content[0].text.strip()
-    text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    text = ""
+    for attempt in range(2):  # 話者ラベルが残ったら1度だけ引き直す
+        msg = client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text.strip()
+        text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+        if not re.search(r"[Ss]peaker\s*\d", text):
+            break
+        print(f"  話者ラベルが残ったため再生成（{attempt + 1}回目）")
     try:
         data = json.loads(text)
     except Exception:
@@ -311,10 +325,29 @@ def sort_tab_desc(service, sheet_id, ssid=None):
 
 
 def append_rows(service, title, rows, ssid=None):
-    service.spreadsheets().values().append(
+    """追記して、書き込まれた先頭行の行番号（1始まり）を返す"""
+    resp = service.spreadsheets().values().append(
         spreadsheetId=ssid or SHEET_ID, range=f"{title}!A1",
         valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
         body={"values": rows},
+    ).execute()
+    m = re.search(r"![A-Z]+(\d+)", resp.get("updates", {}).get("updatedRange", ""))
+    return int(m.group(1)) if m else None
+
+
+def color_row(service, sheet_id, row_no, is_kanbu, ssid=None):
+    """院長スプシで「誰が実施した面談か」を背景色で区別する（院長指示2026-07-28）。
+    幹部が実施＝薄い緑 / 院長が実施＝白。ソートしても書式は行と一緒に動く。"""
+    if not row_no:
+        return
+    bg = KANBU_BG if is_kanbu else {"red": 1.0, "green": 1.0, "blue": 1.0}
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=ssid or SHEET_ID,
+        body={"requests": [{"repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": row_no - 1, "endRowIndex": row_no,
+                      "startColumnIndex": 0, "endColumnIndex": 5},
+            "cell": {"userEnteredFormat": {"backgroundColor": bg}},
+            "fields": "userEnteredFormat.backgroundColor"}}]},
     ).execute()
 
 
@@ -389,14 +422,17 @@ def main():
                 continue
             note_ids = get_note_ids(f["id"])
             share_url = get_share_url(f["id"], note_ids)
-            analysis = analyze(summary)  # 要約整形は1回だけ実行して両方に使い回す
+            analysis = analyze(summary, name)  # 要約整形は1回だけ実行して両方に使い回す
             rows = build_rows(f["date"], analysis, share_url, f["id"])
             n_todo = len(analysis.get("todos") or [])
 
             for label in targets:
                 b = books[label]
                 sid = ensure_tab(service, name, b["map"], b["ssid"])
-                append_rows(service, name, rows, b["ssid"])
+                row_no = append_rows(service, name, rows, b["ssid"])
+                if label == "院長":
+                    # 院長シートだけ色分け（幹部シートは全部が幹部実施なので不要）
+                    color_row(service, sid, row_no, f["is_kanbu"], b["ssid"])
                 sort_tab_desc(service, sid, b["ssid"])  # 追記のたびに面談日の降順へ整列（最新が一番上）
                 print(f"  追記[{label}／{name}] {f['date']} やること{n_todo}件: {f['title']}")
                 added[label].append(f"{name}（{f['date']}・やること{n_todo}件）")
