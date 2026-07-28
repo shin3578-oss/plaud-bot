@@ -282,6 +282,19 @@ def build_rows(date, analysis, share_url, rec_id):
     return [[date, summ, todo_text, share_url, rec_id]]
 
 
+def sort_tab_desc(service, sheet_id):
+    """面談日（A列）で降順ソート＝最新の面談が常に一番上。
+    PLAUDの取得順やバックフィルの都合で行が前後しても、追記のたびにここで整列する。
+    空行は常に末尾に送られるため、行数の増減や手動追記があっても壊れない。"""
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=SHEET_ID,
+        body={"requests": [{"sortRange": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 5},
+            "sortSpecs": [{"dimensionIndex": 0, "sortOrder": "DESCENDING"}],
+        }}]},
+    ).execute()
+
+
 def append_rows(service, title, rows):
     service.spreadsheets().values().append(
         spreadsheetId=SHEET_ID, range=f"{title}!A1",
@@ -348,8 +361,9 @@ def main():
             share_url = get_share_url(f["id"], note_ids)
             analysis = analyze(summary)
             rows = build_rows(f["date"], analysis, share_url, f["id"])
-            ensure_tab(service, name, sheets_map)
+            sid = ensure_tab(service, name, sheets_map)
             append_rows(service, name, rows)
+            sort_tab_desc(service, sid)  # 追記のたびに面談日の降順へ整列（最新が一番上）
             n_todo = len(analysis.get("todos") or [])
             print(f"  追記[{name}] {f['date']} やること{n_todo}件: {f['title']}")
             added.append(f"{name}（{f['date']}・やること{n_todo}件）")
