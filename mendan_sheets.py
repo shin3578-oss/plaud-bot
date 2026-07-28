@@ -45,6 +45,8 @@ KANBU_STAFF = set(filter(None, os.environ.get(
 KANBU_BG = {"red": 0.87, "green": 0.95, "blue": 0.87}
 
 HEADER = ["面談日", "要約", "その日決まったTODO", "PLAUDリンク", "録音ID"]
+# スタッフ別タブではない＝面談記録が入らないタブ（録音IDの照合対象から外す）
+NON_STAFF_TABS = ("説明", "配信ログ", "シノ面談の取り込み")
 
 # ---- PLAUDトークン（ローカルはplaud_storage.json、Actionsは環境変数） ----
 _token_file = Path(r"C:\Users\shin3\Desktop\AI\plaud_storage.json")
@@ -245,7 +247,7 @@ def get_all_sheets(service, ssid=None):
 def get_existing_ids(service, tab_titles, ssid=None):
     """全スタッフタブのE列（録音ID）を集める"""
     ids = set()
-    ranges = [f"{t}!E2:E" for t in tab_titles if t not in ("説明", "配信ログ")]
+    ranges = [f"{t}!E2:E" for t in tab_titles if t not in NON_STAFF_TABS]
     if not ranges:
         return ids
     resp = service.spreadsheets().values().batchGet(spreadsheetId=ssid or SHEET_ID, ranges=ranges).execute()
