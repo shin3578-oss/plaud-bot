@@ -130,6 +130,17 @@ def parse_head(text):
     return title, date
 
 
+# 面談ではない録音（面談スプシに入れない）。シノのスレッドには面接・セミナー・
+# 会議のリンクも混ざるため、名前が取れても以下が付くものは記録しない。
+NOT_MENDAN = ("面接", "セミナー", "講演", "講義", "会議", "MTG", "ミーティング", "研修")
+
+
+def is_not_mendan(title):
+    """タイトルの先頭付近に面談以外を示す語があるか（本文中の言及では判定しない）"""
+    head = title[:40]
+    return any(w in head for w in NOT_MENDAN)
+
+
 def guess_staff(title, text):
     """タイトル（例: '07-28 面談：重野'）からスタッフ名を判定。
     見つからなければ空文字を返し、呼び出し側でスキップする（推測で書かない）。"""
@@ -172,6 +183,9 @@ def main():
                 results.append((row_no, "❌ ページを読めませんでした（URLが無効か期限切れ）"))
                 continue
             title, date = parse_head(text)
+            if is_not_mendan(title):
+                results.append((row_no, "対象外（面接・セミナー・会議のため記録しません）"))
+                continue
             name = manual_name or guess_staff(title, text)
             if not name:
                 results.append((row_no, "❌ スタッフ名が分かりません→B列に氏名を書いてください"))
