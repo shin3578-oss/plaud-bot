@@ -202,8 +202,14 @@ def analyze(summary, staff_name=""):
 
 {{
   "summary": "面談内容を200〜350字で簡潔にまとめた要約（敬体）",
-  "todos": [ "面談で決まった具体的なやること（1件ずつ・短い文で）" ]
+  "todos": [ "面談で決まった具体的なやること（1件ずつ・短い文で）" ],
+  "interviewer": "面談した側が誰か。「桑野」「斉藤」「院長」のいずれか。少しでも迷うなら「不明」"
 }}
+
+interviewer は録音タイトルの付け忘れを見つけるためだけに使い、記録内容には出しません。
+本人が名乗っている、明確に名前で呼ばれている等の**はっきりした根拠がある場合だけ**
+「桑野」「斉藤」「院長」と答えてください。**根拠が無ければ必ず「不明」**。
+話の内容から「たぶん衛生士の上司だろう」といった推測で決めないでください。
 
 {who}元の要約には「Speaker 1」「Speaker 2」のような話者ラベルが混ざっていることがあります。
 出力にはこの話者ラベルを絶対に使わないでください。次のように書き換えます。
@@ -230,9 +236,10 @@ def analyze(summary, staff_name=""):
         data = json.loads(text)
     except Exception:
         # 抽出失敗時はPLAUD要約をそのまま・TODOなしで通す（黙って落とさない）
-        return {"summary": summary[:350], "todos": []}
+        return {"summary": summary[:350], "todos": [], "interviewer": "不明"}
     data.setdefault("summary", summary[:350])
     data.setdefault("todos", [])
+    data.setdefault("interviewer", "不明")
     return data
 
 
@@ -404,6 +411,10 @@ def main():
 
     added = {"院長": [], "幹部": []}
     errors = []
+    # 「面談（…）」で録れているが、話の中では桑野さん・斉藤さんが面談しているように見えるもの。
+    # 幹部面談の付け忘れの可能性があるため院長へ知らせるだけで、**振り分けは一切変えない**
+    # （印が無いものを幹部へ流さないのは、院長実施の機密面談を守るための安全側の設計。2026-08-05）
+    suspects = []
     for f in files:
         try:
             name = extract_name(f["title"])
@@ -427,6 +438,12 @@ def main():
             analysis = analyze(summary, name)  # 要約整形は1回だけ実行して両方に使い回す
             rows = build_rows(f["date"], analysis, share_url, f["id"])
             n_todo = len(analysis.get("todos") or [])
+
+            # 付け忘れの疑い（通知だけ・振り分けには使わない）
+            who = (analysis.get("interviewer") or "").strip()
+            if not f["is_kanbu"] and name in KANBU_STAFF and who in ("桑野", "斉藤"):
+                suspects.append(f"{name}（{f['date']}・{who}さんが面談しているようです）\n  {f['title']}")
+                print(f"  ⚠️ 幹部面談の付け忘れかも[{name}] 実施者らしき人: {who}")
 
             for label in targets:
                 b = books[label]
@@ -453,6 +470,11 @@ def main():
             msg += "\n■ 幹部シェア用シート（桑野さん・斉藤さんが閲覧できます）\n"
             msg += "\n".join(f"・{a}" for a in added["幹部"])
             msg += f"\nhttps://docs.google.com/spreadsheets/d/{KANBU_SHEET_ID}/edit"
+        if suspects:
+            msg += "\n\n⚠️ 幹部面談の付け忘れかもしれません\n"
+            msg += "\n".join(f"・{s}" for s in suspects)
+            msg += ("\n録音タイトルが「面談（…）」だったため、院長シートにだけ入れました。"
+                    "幹部シェア用にも入れる場合はAIに「幹部シェアにも入れて」と伝えてください。")
         notify_shincho(msg)
     if errors:
         notify_shincho("⚠️【面談記録】一部の面談が記録できませんでした\n\n" + "\n".join(errors))
