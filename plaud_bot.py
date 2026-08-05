@@ -6,9 +6,16 @@
 3. LINE WORKS Bot APIで「軸」チャンネルに投稿
 """
 import json, gzip, requests, os, sys, time, re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 
 JST = timezone(timedelta(hours=9))
+
+# --- 2026-08 一時措置：軸チャンネルへの自動投稿を停止 ------------------------
+# 理由: 村田さんの卒業に伴い、8月の軸MTGには村田さんに関わる内容が含まれるため、
+#       村田さんが在籍しているLINEワークス「軸」チャンネルへは自動投稿しない。
+#       8月中は院長DMにだけ送り、院長が通常LINEの「サブ軸」グループへ手動で共有する。
+# 戻し: この日付になったら自動で元の軸チャンネル投稿に戻る（手作業での戻しは不要）。
+CH_RESUME_DATE = date(2026, 9, 1)
 
 PLAUD_API      = "https://api-apne1.plaud.ai"
 PLAUD_TOKEN    = os.environ["PLAUD_TOKEN"]
@@ -188,19 +195,24 @@ def send_to_lineworks(message):
     print("LINE WORKS送信完了")
 
 
+def send_dm_to_shincho(message):
+    """院長へDMを送る。失敗したら例外を投げる（握りつぶさない）"""
+    access_token = get_lw_access_token()
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    r = requests.post(
+        f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
+        headers=headers,
+        json={"content": {"type": "text", "text": message}},
+        timeout=30
+    )
+    r.raise_for_status()
+    print("院長へDM送信完了")
+
+
 def send_alert_to_shincho(message):
-    """院長へDMでアラートを送る"""
+    """院長へDMでアラートを送る（アラート自体の失敗でBotを落とさない）"""
     try:
-        access_token = get_lw_access_token()
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-        r = requests.post(
-            f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
-            headers=headers,
-            json={"content": {"type": "text", "text": message}},
-            timeout=30
-        )
-        r.raise_for_status()
-        print("院長へアラート送信完了")
+        send_dm_to_shincho(message)
     except Exception as e:
         print(f"アラート送信失敗: {e}")
 
@@ -228,10 +240,13 @@ def main():
             print("軸MTGファイルが見つかりません")
 
             if attempt >= ALERT_AFTER_ATTEMPTS and not alert_sent:
+                dest = ("院長DMに送ります（8月中は軸チャンネルへの自動投稿を停止中）"
+                        if datetime.now(JST).date() < CH_RESUME_DATE
+                        else "自動で軸チャンネルに投稿します")
                 alert = (
                     f"【軸MTGBot】{today} の軸MTGファイルがPLAUDで見つかりません。\n\n"
                     "録音がある場合はPLAUDをアップロードしてください。\n"
-                    "アップロードされ次第、自動で軸チャンネルに投稿します。\n\n"
+                    f"アップロードされ次第、{dest}。\n\n"
                     "本日軸MTGがない場合はこのメッセージは無視してください。"
                 )
                 send_alert_to_shincho(alert)
@@ -262,11 +277,23 @@ def main():
             sys.exit(1)
 
         append_to_google_docs(title, summary, share_url)
-        lw_message = f"【軸MTG議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
-        send_to_lineworks(lw_message)
 
-        if alert_sent:
-            send_alert_to_shincho(f"✅ 軸MTG議事録を軸チャンネルに投稿しました。\n{title}")
+        if datetime.now(JST).date() < CH_RESUME_DATE:
+            # 8月の一時措置：軸チャンネルには投稿せず、院長DMのみに送る
+            send_dm_to_shincho(
+                "【軸MTGBot】8月中は軸チャンネルへの自動投稿を停止しています。\n"
+                "下のリンクをサブ軸グループへ手動で共有してください。\n\n"
+                f"{title}\n\n"
+                f"PLAUD要約リンク: {share_url}\n\n"
+                f"※{CH_RESUME_DATE.month}月{CH_RESUME_DATE.day}日から自動で軸チャンネル投稿に戻ります"
+            )
+            print(f"軸チャンネル投稿は停止中（{CH_RESUME_DATE}まで）。院長DMのみ送信")
+        else:
+            lw_message = f"【軸MTG議事録】\n{title}\n\nPLAUD要約リンク: {share_url}"
+            send_to_lineworks(lw_message)
+
+            if alert_sent:
+                send_alert_to_shincho(f"✅ 軸MTG議事録を軸チャンネルに投稿しました。\n{title}")
 
         print(f"完了: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
         return
