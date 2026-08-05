@@ -44,12 +44,17 @@ def find_latest_jiku_mtg():
     r.raise_for_status()
     today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
     print(f"対象日付: {today}")
+    same_day = []
     for f in r.json().get("data_file_list", []):
         title = f.get("filename", "") or f.get("title", "")
         start_time = f.get("start_time", 0)
         file_date = datetime.fromtimestamp(start_time / 1000, tz=JST).strftime("%Y-%m-%d")
-        if "軸MTG" in title and file_date == today:
-            return f.get("id", ""), title
+        if file_date == today:
+            same_day.append(title)
+            if "軸MTG" in title:
+                return f.get("id", ""), title
+    # 見つからなかった理由を残す（同じ日に録音はあるのにタイトルが違う、が過去に起きている）
+    print(f"  同じ日の録音{len(same_day)}件: " + (" / ".join(f'「{t}」' for t in same_day) or "なし"))
     return None, None
 
 
@@ -227,7 +232,10 @@ def main():
     MAX_ATTEMPTS       = 6
     RETRY_INTERVAL     = 3600
     ALERT_AFTER_ATTEMPTS = 2
+    # 対象日は最初に決めて固定する。再試行は最大6時間続き日付をまたぐため、
+    # 毎回 now() を読み直すと 0時から翌日を探し始めて開催日の録音を永久に取りこぼす（2026-08-05に発生）
     today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
+    os.environ["TARGET_DATE"] = today
     alert_sent = False
     found_but_no_summary = False
 

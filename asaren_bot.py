@@ -213,7 +213,9 @@ def main():
     MAX_ATTEMPTS = 6
     RETRY_INTERVAL = 3600      # 1時間
     ALERT_AFTER_ATTEMPTS = 2   # 2回失敗したら1度だけアラート送信
+    # 対象日は最初に決めて固定する（再試行中に日付をまたぐと翌日を探し始めてしまうため）
     today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
+    os.environ["TARGET_DATE"] = today
     alert_sent = False
     found_but_no_summary = False
 
