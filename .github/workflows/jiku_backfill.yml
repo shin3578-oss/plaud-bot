@@ -1,0 +1,62 @@
+# ==========================================================
+# 【何をする】軸MTG Bot が拾えなかった回を、あとから「軸MTG要約集」Googleドキュメントへ追記する
+# 【いつ動く】手動のみ（Actionsタブから実行）。定期実行はしない＝Cron-job.org への登録も不要
+# 【使い方】
+#   ・院長が欠席で録音が他の人のPLAUDにある回 → share_url に共有URLを入れる
+#   ・Botの実行日と録音日がずれた回           → target_date に YYYY-MM-DD を入れる
+#   LINEワークスへは投稿しない（ドキュメントに入れ直すだけ）。二重追記はスキップされる。
+# ==========================================================
+name: 軸MTG 後追い追記（手動）
+
+on:
+  workflow_dispatch:
+    inputs:
+      share_url:
+        description: 'PLAUD共有URL（院長のPLAUDに録音が無い回はこちら）'
+        required: false
+        default: ''
+      target_date:
+        description: '録音日 YYYY-MM-DD（院長のPLAUDにある回はこちら）'
+        required: false
+        default: ''
+      entry_date:
+        description: 'ドキュメントの見出しに使う日付（省略時は録音日）'
+        required: false
+        default: ''
+      note:
+        description: '本文の最後に付ける注記（任意）'
+        required: false
+        default: ''
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: Chromium をインストール（共有ページを読むため）
+        run: playwright install chromium --with-deps
+
+      - name: 後追い追記を実行
+        env:
+          PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
+          GOOGLE_DOCS_ID:          ${{ secrets.GOOGLE_DOCS_ID }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_JIKU_CH:              ${{ secrets.LW_JIKU_CH }}
+          SHARE_URL:               ${{ github.event.inputs.share_url }}
+          TARGET_DATE:             ${{ github.event.inputs.target_date }}
+          ENTRY_DATE:              ${{ github.event.inputs.entry_date }}
+          NOTE:                    ${{ github.event.inputs.note }}
+        run: python jiku_backfill.py
