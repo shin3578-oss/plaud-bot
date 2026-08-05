@@ -27,6 +27,10 @@ on:
         description: '本文の最後に付ける注記（任意）'
         required: false
         default: ''
+      replace:
+        description: '同じ日付がすでにあっても消して入れ直す（取り込み失敗のやり直し用）'
+        required: false
+        default: ''
 
 jobs:
   backfill:
@@ -59,4 +63,5 @@ jobs:
           TARGET_DATE:             ${{ github.event.inputs.target_date }}
           ENTRY_DATE:              ${{ github.event.inputs.entry_date }}
           NOTE:                    ${{ github.event.inputs.note }}
+          REPLACE:                 ${{ github.event.inputs.replace }}
         run: python jiku_backfill.py
