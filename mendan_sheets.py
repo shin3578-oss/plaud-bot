@@ -26,9 +26,11 @@ JST = timezone(timedelta(hours=9))
 PLAUD_API = "https://api-apne1.plaud.ai"
 SHEET_ID = os.environ.get("MENDAN_SHEET_ID", "11Zct4Knwz6ItPB1dmFIKz0Yx-ZEAbeZVp5LvWLx6D7A")
 DAYS_BACK = int(os.environ.get("MENDAN_DAYS_BACK", "60"))
-# 記録除外スタッフ（この人自身の面談はシートに残さない。院長指示2026-07-25:
-# 全スタッフの面談を記録する。桑野・斉藤本人の面談のみ対象外。スプシ共有は院長のみ）
-EXCLUDE_STAFF = set(filter(None, os.environ.get("MENDAN_EXCLUDE_STAFF", "桑野碧,斉藤愛莉").split(",")))
+# 記録除外スタッフ（この人自身の面談はシートに残さない）
+# 2026-08-07 院長指示で除外を解除＝**全スタッフを記録**（桑野碧・斉藤愛莉も含む）。
+# 院長スプシは院長のみ共有なので、幹部本人の面談を入れても本人には見えない。
+# 幹部シェア用スプシ側は KANBU_STAFF のホワイトリスト運用なので、そちらには入らない。
+EXCLUDE_STAFF = set(filter(None, os.environ.get("MENDAN_EXCLUDE_STAFF", "").split(",")))
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 # ---- 幹部シェア用スプシ（院長指示2026-07-28）----
