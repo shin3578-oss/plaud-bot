@@ -15,6 +15,8 @@ from pathlib import Path
 
 import requests
 
+from clinic_calendar import closed_reason
+
 # Windowsコンソール(cp932)でも絵文字・ダッシュ等で落ちないようUTF-8出力に
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -391,6 +393,17 @@ def notify_shincho(message):
 # ==============================
 def main():
     print(f"面談記録シートBot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # ── 休診日は面談をしないので走らせない ──
+    # 祝日判定では お盆・年末年始・臨時休診 を拾えないため、アポツールの rest-all を
+    # 書き出した公開カレンダーで判定する（2026-08-12のお盆の誤発報を受けて追加）。
+    # MENDAN_FORCE=1 を付ければ休診日でも実行できる（過去分の取り込み直し用）。
+    if os.environ.get("MENDAN_FORCE") != "1":
+        reason = closed_reason()
+        if reason:
+            print(f"本日は{reason} → 面談はないため何もしません（通知も送りません）")
+            return
+
     if not PLAUD_TOKEN:
         print("❌ PLAUD_TOKEN未設定")
         sys.exit(1)

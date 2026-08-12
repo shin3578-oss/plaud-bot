@@ -8,6 +8,8 @@
 import json, gzip, requests, os, sys, time, re
 from datetime import datetime, timezone, timedelta, date
 
+from clinic_calendar import closed_reason
+
 JST = timezone(timedelta(hours=9))
 
 # --- 2026-08 一時措置：軸チャンネルへの自動投稿を停止 ------------------------
@@ -228,6 +230,15 @@ def send_alert_to_shincho(message):
 
 def main():
     print(f"軸MTG Bot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # ── 休診日は軸MTGを開かないので、探しにいかない ──
+    # 祝日判定では お盆・年末年始・臨時休診 を拾えないため、アポツールの rest-all を
+    # 書き出した公開カレンダーで判定する。TARGET_DATE 指定時（取り直し）はガードしない。
+    if not os.environ.get("TARGET_DATE"):
+        reason = closed_reason()
+        if reason:
+            print(f"本日は{reason} → 軸MTGはないため何もしません（通知も送りません）")
+            return
 
     MAX_ATTEMPTS       = 6
     RETRY_INTERVAL     = 3600

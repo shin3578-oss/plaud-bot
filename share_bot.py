@@ -20,6 +20,8 @@ from pathlib import Path
 
 import requests
 
+from clinic_calendar import closed_reason
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -265,6 +267,18 @@ def main():
     today = now.strftime("%Y-%m-%d")
     weekday = now.weekday()
     print(f"PLAUD配信Bot 開始: {now.strftime('%Y-%m-%d %H:%M:%S')} JST（{WEEKDAY_JA[weekday]}曜・mode={SHARE_MODE or '本番'}）")
+
+    # ── 休診日は丸ごとスキップ（院長指示 2026-08-12）──
+    # 休診日は事務MTGも面談もしない。ここを止めないと「木曜なのに事務MTGの録音が無い」
+    # 「金曜なのに面談（桑野）の録音が無い」という曜日アラートが休診日に必ず誤爆する。
+    # 祝日判定では お盆・年末年始・臨時休診 を拾えないため公開カレンダーで判定する。
+    # SHARE_MODE=test（動作確認）のときはガードしない。
+    if SHARE_MODE != "test":
+        reason = closed_reason(now.date())
+        if reason:
+            print(f"本日は{reason} → 配信もアラートも行いません（通知も送りません）")
+            return
+
     if not PLAUD_TOKEN:
         print("❌ PLAUD_TOKEN未設定")
         sys.exit(1)

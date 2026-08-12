@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-朝練Bot - 毎日10:00 JST (GitHub Actions / LINE WORKS Bot API)
+朝練Bot - 水・金 10:00 JST (GitHub Actions / LINE WORKS Bot API)
+0. 休診日なら何もしないで終わる（休診日は朝練をしないため）
 1. PLAUDから最新の「朝練」ファイルの要約を取得
 2. Google Docsに追記
 3. LINE WORKS Bot APIで「歯科医師」チャンネルに投稿
 """
 import json, gzip, requests, os, sys, time, re
 from datetime import datetime, timezone, timedelta
+
+from clinic_calendar import closed_reason
 
 JST = timezone(timedelta(hours=9))
 
@@ -209,6 +212,17 @@ def send_alert_to_shincho(message):
 
 def main():
     print(f"朝練Bot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')} JST")
+
+    # ── 休診日は朝練をしないので、探しにいかない ──
+    # 2026-08-12（お盆の水曜・休診）に「朝練ファイルが見つかりません」を院長DMへ
+    # 誤送信した。祝日判定では お盆・年末年始・臨時休診 を拾えないため、
+    # アポツールの rest-all を書き出した公開カレンダーで判定する。
+    # TARGET_DATE を手で指定したとき（過去分の取り直し）は院長の意図なのでガードしない。
+    if not os.environ.get("TARGET_DATE"):
+        reason = closed_reason()
+        if reason:
+            print(f"本日は{reason} → 朝練はないため何もしません（通知も送りません）")
+            return
 
     MAX_ATTEMPTS = 6
     RETRY_INTERVAL = 3600      # 1時間
