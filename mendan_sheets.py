@@ -401,7 +401,9 @@ def main():
     if os.environ.get("MENDAN_FORCE") != "1":
         reason = closed_reason()
         if reason:
-            print(f"本日は{reason} → 面談はないため何もしません（通知も送りません）")
+            print(f"本日は{reason} → 面談はないため何もしません")
+            # PLAUD配信Bot(share_bot.py)も同じ理由で止まるので、21:00枠はこの1行にまとめる
+            notify_shincho(f"【面談記録シートBot／PLAUD配信Bot】本日は{reason}のためスキップしました")
             return
 
     if not PLAUD_TOKEN:

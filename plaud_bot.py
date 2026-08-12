@@ -28,6 +28,8 @@ LW_CLIENT_ID       = "0cAEPO2Yzau80tSsEhxV"
 LW_CLIENT_SECRET   = "d7WfxxO2t1"
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID          = "12266491"
+# 休診日スキップの1行だけは完了通知Bot（要対応の既存Botに混ぜない）
+LW_SKIP_BOT_ID     = "12786833"
 LW_JIKU_CH         = os.environ["LW_JIKU_CH"]
 LW_PRIVATE_KEY     = os.environ["LW_PRIVATE_KEY"]
 LW_SHINCHO_ID      = "shin@ovalcourtdental"
@@ -224,6 +226,26 @@ def send_alert_to_shincho(message):
         print(f"アラート送信失敗: {e}")
 
 
+def send_skip_notice(message):
+    """休診日スキップの1行を院長DMへ送る（完了通知Bot＝要対応の既存Botと分ける）。
+
+    黙って終わると「止まったのか休診なのか」が区別できないため、1行だけ知らせる
+    （院長指示 2026-08-12）。送信に失敗しても本体の判断は変えない。
+    """
+    try:
+        access_token = get_lw_access_token()
+        r = requests.post(
+            f"https://www.worksapis.com/v1.0/bots/{LW_SKIP_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json={"content": {"type": "text", "text": message}},
+            timeout=30
+        )
+        r.raise_for_status()
+        print("休診日スキップの1行を院長DMへ送信しました")
+    except Exception as e:
+        print(f"休診日スキップ通知の送信に失敗（本体はスキップのまま続行）: {e}")
+
+
 # ========================
 # Main
 # ========================
@@ -237,7 +259,8 @@ def main():
     if not os.environ.get("TARGET_DATE"):
         reason = closed_reason()
         if reason:
-            print(f"本日は{reason} → 軸MTGはないため何もしません（通知も送りません）")
+            print(f"本日は{reason} → 軸MTGはないため何もしません")
+            send_skip_notice(f"【軸MTGBot】本日は{reason}のためスキップしました")
             return
 
     MAX_ATTEMPTS       = 6

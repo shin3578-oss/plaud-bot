@@ -276,7 +276,9 @@ def main():
     if SHARE_MODE != "test":
         reason = closed_reason(now.date())
         if reason:
-            print(f"本日は{reason} → 配信もアラートも行いません（通知も送りません）")
+            # 1行の知らせは面談記録シートBot（同じジョブの先行ステップ）がまとめて送るので、
+            # ここでは送らない（21:00に同じ内容が2通届くのを避ける）
+            print(f"本日は{reason} → 配信もアラートも行いません")
             return
 
     if not PLAUD_TOKEN:
