@@ -407,7 +407,9 @@ def main():
             if is_not_mendan(title):
                 results.append((row_no, "対象外（面接・セミナー・会議のため記録しません）"))
                 continue
-            name = manual_name or guess_staff(title, text)
+            # 投函箱には名字だけ書かれる（例「若澤」）。STAFF_MAPで正式なタブ名に直してから使う。
+            # 直さないと「若澤」という別タブが増えて記録が2箇所に散る（2026-08-18に発生）。
+            name = STAFF_MAP.get(manual_name, manual_name) or guess_staff(title, text)
             if not name:
                 results.append((row_no, "❌ スタッフ名が分かりません→B列に氏名を書いてください"))
                 continue
