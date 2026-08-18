@@ -156,6 +156,17 @@ def guess_staff(title, text):
     return ""
 
 
+def pick_url_name(r):
+    """投函箱の行から (URL, スタッフ名) を取り出す。列の順番は決め打ちしない。
+    2026-08-18: 投函箱の見出しが「スタッフ名｜リンク」の並びだったため、A列＝URL前提の
+    読み方だと全行がURLでないと判定され、7/28以降の11件が無言で取り込まれていなかった。
+    どちらの列に貼られても拾えるようにして、同じ止まり方を二度させない。"""
+    cells = [(c or "").strip() for c in (r or [])[:2]]
+    url = next((c for c in cells if c.startswith("http")), "")
+    name = next((c for c in cells if c and not c.startswith("http")), "")
+    return url, name
+
+
 def sync_from_inbox(service):
     """シノの投函箱に貼られたURLを、院長スプシの取り込みタブへ転記する。
     投函箱には面談の中身を書き戻さない（シノが他スタッフの記録を見られないようにするため、
@@ -175,10 +186,9 @@ def sync_from_inbox(service):
 
     add, marks = [], []
     for i, r in enumerate(inbox):
-        url = r[0].strip() if r else ""
-        if not url.startswith("http"):
+        url, name = pick_url_name(r)
+        if not url:
             continue
-        name = r[1].strip() if len(r) > 1 else ""
         if url in have:
             if not (len(r) > 2 and r[2].strip()):
                 marks.append((i + INBOX_FIRST_ROW, "受け取りました"))
@@ -214,7 +224,7 @@ def writeback_to_inbox(service):
     status = {r[0].strip(): (r[3] if len(r) > 3 else "") for r in done if r and r[0].strip()}
     data = []
     for i, r in enumerate(inbox):
-        url = r[0].strip() if r else ""
+        url, _ = pick_url_name(r)
         if not url:
             continue
         s = status.get(url, "")
