@@ -367,7 +367,9 @@ def color_row(service, sheet_id, row_no, is_kanbu, ssid=None):
 # ==============================
 # LINE WORKS（院長DM）
 # ==============================
-def notify_shincho(message):
+def notify_shincho(message, bot_id=None):
+    """院長DMへ通知。bot_id を渡すと送信元Botを変えられる
+    （完了報告=12786833／異常の見張り=失敗通知Bot 12789558）。"""
     if not LW_PRIVATE_KEY:
         print("  LW_PRIVATE_KEY未設定のため通知スキップ")
         return
@@ -380,7 +382,7 @@ def notify_shincho(message):
                             data={"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion,
                                   "client_id": LW_CLIENT_ID, "client_secret": LW_CLIENT_SECRET, "scope": "bot"},
                             timeout=30).json()["access_token"]
-        requests.post(f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
+        requests.post(f"https://www.worksapis.com/v1.0/bots/{bot_id or LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
                       headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
                       json={"content": {"type": "text", "text": message}}, timeout=30).raise_for_status()
         print("  院長DM通知完了")

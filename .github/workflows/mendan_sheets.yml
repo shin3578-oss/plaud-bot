@@ -7,6 +7,9 @@
 #            ③シノ面談 取り込みBot(shino_import.py): 院長スプシの「シノ面談の取り込み」タブに
 #             貼られたPLAUD共有URLを読みに行き、要約＋TODOを該当スタッフのタブへ青い行で追記。
 #             シノの録音は本人のPLAUDアカウントにあり院長のAPIからは見えないため、URLを入口にする。
+#             あわせて「見張り」が動く：投函箱に置かれたのにBotが受け取れていない行、
+#             リンクとして読めない行、30日以上取り込みが無い状態を検知して失敗通知Botで院長DMへ。
+#             （2026-08-18: 投函箱を1件も読めていない状態が3週間気づかれなかったため追加）
 # 【いつ動く】月〜土 21:00｜apotoolの sync_consult.yml から連鎖dispatchで起動
 #            （Cron-job.orgは12件で満杯のため専用ジョブは作らず相乗り）
 # 【共有先】  ①スプシは院長のみ（2026-07-25に軸コア共有を解除。幹部実施分のみ幹部シェア用スプシへ）
@@ -26,6 +29,14 @@ on:
     inputs:
       share_mode:
         description: "配信Botのモード（空=本番 / test=全メッセージを院長DMのみに送る）"
+        required: false
+        default: ""
+      no_notify:
+        description: "1 を入れると通知を送らない（検証用。見張りの警告を院長DMに飛ばさない）"
+        required: false
+        default: ""
+      watch_test:
+        description: "1 を入れると見張りのテスト通知だけを送る（他のBotは動かさない）"
         required: false
         default: ""
 
@@ -50,6 +61,7 @@ jobs:
         run: playwright install chromium --with-deps
 
       - name: 面談記録シートBotを実行
+        if: inputs.watch_test != '1'
         env:
           PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
@@ -63,10 +75,12 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           CLAUDE_API_KEY:          ${{ secrets.CLAUDE_API_KEY }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          NO_NOTIFY:               ${{ inputs.no_notify }}
+          WATCH_TEST:              ${{ inputs.watch_test }}
         run: python shino_import.py
 
       - name: PLAUD配信Botを実行（面談・事務MTGのリンク配信）
-        if: always()    # シートBotが失敗しても配信は実行する
+        if: always() && inputs.watch_test != '1'    # シートBotが失敗しても配信は実行する
         env:
           PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}

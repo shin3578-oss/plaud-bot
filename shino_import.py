@@ -248,6 +248,125 @@ def writeback_to_inbox(service):
         print(f"  投函箱に結果を{len(data)}件返しました")
 
 
+# ==============================
+# 見張り（静かに止まっていることを検知する）
+# ==============================
+# 2026-08-18に、投函箱を1件も読めていない状態が3週間気づかれずに続いた。
+# 「入口が空だから0件」と「入口を読めていないから0件」は画面上まったく同じに見えるため、
+# 0件そのものではなく「投函箱に置かれたのにBotが触れていない行」を異常として見る。
+WATCH_CELL = f"{IMPORT_TAB}!D1"   # 見張りの控え（最後に知らせた日と内容）。Botが使う欄
+STALE_DAYS = 30                   # 投函箱に行があるのに、これだけ取り込みが無ければ知らせる
+RENOTIFY_DAYS = 7                 # 同じ状態が続くとき、何日おきに念押しするか
+LW_FAIL_BOT_ID = "12789558"       # 失敗通知Bot（毎日の完了報告には混ぜない）
+
+
+def _load_watch_state(service):
+    """前回知らせた内容と日付を読む。無ければ空。"""
+    try:
+        v = service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID, range=WATCH_CELL).execute().get("values", [])
+        cell = v[0][0] if v and v[0] else ""
+    except Exception:
+        cell = ""
+    if "|" not in cell:
+        return "", None
+    day, _, sig = cell.partition("|")
+    try:
+        return sig, datetime.strptime(day.strip()[-10:], "%Y-%m-%d").date()
+    except Exception:
+        return sig, None
+
+
+def _save_watch_state(service, sig):
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    service.spreadsheets().values().update(
+        spreadsheetId=SHEET_ID, range=WATCH_CELL, valueInputOption="RAW",
+        body={"values": [[f"見張りの控え {today}|{sig}"]]}).execute()
+
+
+def watchdog(service):
+    """投函箱の滞留と、取り込みが長く止まっていないかを見て院長DMに知らせる。
+    異常が無ければ何も送らない。"""
+    # 見張りそのものが届くかを確かめるための1回きりの送信。
+    # 本番の文面は使わない（整形の途中で「テスト」が消えて本物の警報に見えないように）。
+    if os.environ.get("WATCH_TEST") == "1":
+        notify_shincho(
+            "🧪【これはテストです】シノ面談の取り込み・見張り\n\n"
+            "見張り機能を追加したので、通知が届くかだけを確かめています。\n"
+            "異常は起きていません。このメッセージは無視して大丈夫です。",
+            bot_id=LW_FAIL_BOT_ID)
+        print("  見張り: テスト通知を送信しました")
+        return
+
+    try:
+        inbox = service.spreadsheets().values().get(
+            spreadsheetId=INBOX_SHEET_ID,
+            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute().get("values", [])
+        done = service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute().get("values", [])
+    except Exception as e:
+        print(f"  見張りをスキップ: {e}")
+        return
+
+    unreadable, untouched = [], []
+    for i, r in enumerate(inbox):
+        cells = [(c or "").strip() for c in (r or [])[:3]]
+        if not any(cells[:2]):
+            continue
+        row_no = i + INBOX_FIRST_ROW
+        url, _ = pick_url_name(r)
+        if not url:
+            unreadable.append(row_no)      # リンクとして読めない＝貼り方か列の並びが変わった
+        elif len(cells) < 3 or not cells[2]:
+            untouched.append(row_no)       # Botが結果を書けていない＝転記できていない
+
+    # 最後にBotが何かを処理した日（✅でも対象外でもよい。動いた証拠として見る）
+    last_day = None
+    for r in done:
+        stamp = (r[2].strip() if len(r) > 2 else "")[:10]
+        try:
+            d = datetime.strptime(stamp, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if last_day is None or d > last_day:
+            last_day = d
+    today = datetime.now(JST).date()
+    idle = (today - last_day).days if last_day else None
+    has_inbox = any(any((c or "").strip() for c in (r or [])[:2]) for r in inbox)
+    stale = bool(has_inbox and idle is not None and idle >= STALE_DAYS)
+
+    if not (unreadable or untouched or stale):
+        print("  見張り: 異常なし")
+        return
+
+    lines = []
+    if unreadable:
+        heads = ", ".join(str(n) for n in unreadable[:10])
+        lines.append(f"・リンクとして読めない行が{len(unreadable)}件（投函箱の {heads} 行目）")
+        lines.append("　貼り方か列の並びが変わっているかもしれません")
+    if untouched:
+        heads = ", ".join(str(n) for n in untouched[:10])
+        lines.append(f"・Botが受け取れていない行が{len(untouched)}件（投函箱の {heads} 行目）")
+    if stale:
+        lines.append(f"・最後に取り込んだのは {last_day} で、{idle}日ぶん動いていません")
+
+    sig = f"u{len(unreadable)}/t{len(untouched)}/s{int(stale)}"
+    prev_sig, prev_day = _load_watch_state(service)
+    if sig == prev_sig and prev_day and (today - prev_day).days < RENOTIFY_DAYS:
+        print(f"  見張り: 前回と同じ状態のため通知は見送り（{sig}）")
+        return
+
+    msg = ("【シノ面談の取り込み・見張り】止まっているかもしれません\n\n"
+           + "\n".join(lines)
+           + f"\n\n投函箱: https://docs.google.com/spreadsheets/d/{INBOX_SHEET_ID}/edit"
+           + f"\n取り込みタブ: https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit")
+    if os.environ.get("NO_NOTIFY") == "1":
+        print("  [NO_NOTIFY] 送らずに表示のみ:\n" + msg)
+    else:
+        notify_shincho(msg, bot_id=LW_FAIL_BOT_ID)
+    _save_watch_state(service, sig)
+
+
 def main():
     print(f"シノ面談 取り込みBot 開始: {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
     service = get_sheets_service()
@@ -263,6 +382,7 @@ def main():
     print(f"未取り込みのURL: {len(todo)}件")
     if not todo:
         writeback_to_inbox(service)   # 新規が無くても、前回分の結果は投函箱へ返す
+        watchdog(service)
         return
 
     sheets_map = get_all_sheets(service, SHEET_ID)
@@ -326,6 +446,8 @@ def main():
         msg = "【シノ面談の取り込み】新しい面談を記録しました\n\n" + "\n".join(f"・{a}" for a in added)
         msg += f"\n\nhttps://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
         notify_shincho(msg)
+
+    watchdog(service)
 
 
 if __name__ == "__main__":
