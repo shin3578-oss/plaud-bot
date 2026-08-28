@@ -2,12 +2,19 @@
 # 【何をする】Botが参加しているLINEワークスのトークルーム（チャンネル）ID一覧を
 #             ログに出力する。新しいルームにBotを招待した後、そのIDを特定するための
 #             管理用ワークフロー（定期実行なし・手動のみ）
+#             院内の5つのBot全部を順に問い合わせるので、どのBotを招待したか
+#             分からなくても該当ルームが見つかる。読み取りだけ・メッセージは送らない。
 # 【いつ動く】手動実行のみ（Cron-job.orgジョブなし）
 # ==========================================================
 name: LINEワークス チャンネルID一覧（管理用）
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_channel:
+        description: "検証したいチャンネルID（任意・読み取りのみ）"
+        required: false
+        default: ""
 
 jobs:
   list-channels:
@@ -22,12 +29,22 @@ jobs:
         env:
           LW_PRIVATE_KEY: ${{ secrets.LW_PRIVATE_KEY }}
           LW_JIMU_CH:     ${{ secrets.LW_JIMU_CH }}
+          VERIFY_CH:      ${{ inputs.verify_channel }}
         run: |
           python - <<'EOF'
           import os, time, requests
           import jwt as pyjwt
+
           CLIENT_ID = "0cAEPO2Yzau80tSsEhxV"
           CLIENT_SECRET = "d7WfxxO2t1"
+          BOTS = {
+              12266491: "('Д') 既存Bot＝チャンネル送信はこれ",
+              12786821: "朝のお知らせBot",
+              12786828: "レポートBot",
+              12786833: "完了通知Bot",
+              12789558: "失敗通知Bot",
+          }
+
           now = int(time.time())
           assertion = pyjwt.encode(
               {"iss": CLIENT_ID, "sub": "3w266.serviceaccount@ovalcourtdental",
@@ -37,16 +54,31 @@ jobs:
               "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
               "assertion": assertion, "client_id": CLIENT_ID,
               "client_secret": CLIENT_SECRET, "scope": "bot"}, timeout=30)
+          r.raise_for_status()
           token = r.json()["access_token"]
-          r2 = requests.get("https://www.worksapis.com/v1.0/bots/12266491/channels?limit=100",
-                            headers={"Authorization": f"Bearer {token}"}, timeout=30)
-          print(f"一覧API status: {r2.status_code}")
-          print(r2.text)
-          # 事務ルームID（LW_JIMU_CH）が有効かを読み取りだけで検証（メッセージは送らない）
-          ch = os.environ.get("LW_JIMU_CH", "")
-          if ch:
-              r3 = requests.get(f"https://www.worksapis.com/v1.0/bots/12266491/channels/{ch}",
-                                headers={"Authorization": f"Bearer {token}"}, timeout=30)
-              print(f"LW_JIMU_CH検証 status: {r3.status_code}")
-              print(r3.text)
+          head = {"Authorization": f"Bearer {token}"}
+
+          for bot_id, label in BOTS.items():
+              print("=" * 70)
+              print(f"■ Bot {bot_id}  {label}")
+              for path in (f"/bots/{bot_id}/channels?count=100",
+                           f"/bots/{bot_id}/channels?limit=100"):
+                  try:
+                      res = requests.get("https://www.worksapis.com/v1.0" + path,
+                                         headers=head, timeout=30)
+                      print(f"  GET {path} -> {res.status_code}")
+                      print("  " + res.text[:3000])
+                      if res.status_code == 200:
+                          break
+                  except Exception as e:
+                      print(f"  GET {path} -> 例外 {e}")
+
+          for name in ("LW_JIMU_CH", "VERIFY_CH"):
+              ch = (os.environ.get(name) or "").strip()
+              if not ch:
+                  continue
+              res = requests.get(
+                  f"https://www.worksapis.com/v1.0/bots/12266491/channels/{ch}",
+                  headers=head, timeout=30)
+              print(f"{name} 検証 -> {res.status_code} {res.text[:500]}")
           EOF
