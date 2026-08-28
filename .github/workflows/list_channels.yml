@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       verify_channel:
-        description: "検証したいチャンネルID（任意・読み取りのみ）"
+        description: "検証したいチャンネルID（カンマ区切りで複数可・読み取りのみ）"
         required: false
         default: ""
 
@@ -73,12 +73,12 @@ jobs:
                   except Exception as e:
                       print(f"  GET {path} -> 例外 {e}")
 
+          print("=" * 70)
+          print("■ チャンネルIDの検証（読み取りのみ・投稿はしない）")
           for name in ("LW_JIMU_CH", "VERIFY_CH"):
-              ch = (os.environ.get(name) or "").strip()
-              if not ch:
-                  continue
-              res = requests.get(
-                  f"https://www.worksapis.com/v1.0/bots/12266491/channels/{ch}",
-                  headers=head, timeout=30)
-              print(f"{name} 検証 -> {res.status_code} {res.text[:500]}")
+              for ch in [c.strip() for c in (os.environ.get(name) or "").split(",") if c.strip()]:
+                  res = requests.get(
+                      f"https://www.worksapis.com/v1.0/bots/12266491/channels/{ch}",
+                      headers=head, timeout=30)
+                  print(f"  {name} {ch} -> {res.status_code} {res.text[:500]}")
           EOF
