@@ -43,6 +43,7 @@ jobs:
               12786828: "レポートBot",
               12786833: "完了通知Bot",
               12789558: "失敗通知Bot",
+              12895816: "God Father",
           }
 
           now = int(time.time())
@@ -77,8 +78,12 @@ jobs:
           print("■ チャンネルIDの検証（読み取りのみ・投稿はしない）")
           for name in ("LW_JIMU_CH", "VERIFY_CH"):
               for ch in [c.strip() for c in (os.environ.get(name) or "").split(",") if c.strip()]:
-                  res = requests.get(
-                      f"https://www.worksapis.com/v1.0/bots/12266491/channels/{ch}",
-                      headers=head, timeout=30)
-                  print(f"  {name} {ch} -> {res.status_code} {res.text[:500]}")
+                  # どのBotを招待したか分からないので、6つ全部で読めるか試す。
+                  # 200が返ったBot＝そのルームに入っているBot（title も分かる）
+                  for bot_id in BOTS:
+                      res = requests.get(
+                          f"https://www.worksapis.com/v1.0/bots/{bot_id}/channels/{ch}",
+                          headers=head, timeout=30)
+                      mark = "★" if res.status_code == 200 else " "
+                      print(f"  {mark} {ch} / bot {bot_id} -> {res.status_code} {res.text[:300]}")
           EOF
