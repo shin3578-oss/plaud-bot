@@ -448,6 +448,11 @@ def main():
         msg = "【シノ面談の取り込み】新しい面談を記録しました\n\n" + "\n".join(f"・{a}" for a in added)
         msg += f"\n\nhttps://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
         notify_shincho(msg)
+    else:
+        # 取り込むものが無い回も「動いた」1行を送る（院長指示 2026-09-03）。
+        # 無音だと、面談が無かったのかBotが止まったのか区別が付かないため。
+        d = datetime.now(JST)
+        notify_shincho(f"【シノ面談の取り込み】{d.month}/{d.day} 実行 → 新しい面談はありませんでした")
 
     watchdog(service)
 
