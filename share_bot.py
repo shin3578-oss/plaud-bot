@@ -39,7 +39,7 @@ LOG_TAB = "配信ログ"
 LOG_HEADER = ["録音ID", "配信日時", "録音タイトル", "配信先", "状態"]
 
 # ---- PLAUDトークン（ローカルはplaud_storage.json、Actionsは環境変数） ----
-_token_file = Path(r"C:\Users\shin3\Desktop\AI\plaud_storage.json")
+_token_file = Path(r"C:\Users\shin3\Desktop\AI\_secrets\plaud_storage.json")
 if _token_file.exists():
     PLAUD_TOKEN = json.loads(_token_file.read_text(encoding="utf-8")).get("pld_tokenstr", "").strip('"')
 else:
@@ -161,7 +161,7 @@ def get_sheets_service():
     else:
         from google.oauth2.credentials import Credentials
         from google.auth.transport.requests import Request
-        token_path = os.environ.get("DRIVE_TOKEN_PATH", r"C:\Users\shin3\Desktop\AI\drive_token.json")
+        token_path = os.environ.get("DRIVE_TOKEN_PATH", r"C:\Users\shin3\Desktop\AI\_secrets\drive_token.json")
         creds = Credentials.from_authorized_user_file(token_path, scopes)
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
