@@ -14,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import requests
+from sheets_retry import requests_session  # 一時エラー(503/タイムアウト)を自動で再試行（2026-09-12）
+HTTP = requests_session()
 
 from clinic_calendar import closed_reason
 
@@ -105,7 +107,7 @@ def get_sheets_service():
 # ==============================
 def find_mendan_files():
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    r = requests.get(
+    r = HTTP.get(
         f"{PLAUD_API}/file/simple/web?skip=0&limit=200&is_trash=0&sort_by=start_time&is_desc=true",
         headers=headers, timeout=30,
     )
@@ -128,12 +130,12 @@ def find_mendan_files():
 
 def get_summary(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    r = requests.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
+    r = HTTP.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
     r.raise_for_status()
     for item in r.json().get("data", {}).get("content_list", []):
         if item.get("data_type") != "auto_sum_note":
             continue
-        r_s3 = requests.get(item["data_link"], timeout=30)
+        r_s3 = HTTP.get(item["data_link"], timeout=30)
         try:
             return json.loads(gzip.decompress(r_s3.content)).get("ai_content", "")
         except Exception:
@@ -156,7 +158,7 @@ def get_summary(file_id):
 
 def get_note_ids(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    r = requests.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
+    r = HTTP.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
     r.raise_for_status()
     return [str(i["data_id"]) for i in r.json().get("data", {}).get("content_list", [])
             if i.get("data_type") in ("auto_sum_note", "sum_multi_note") and i.get("data_id")]
@@ -165,7 +167,7 @@ def get_note_ids(file_id):
 def get_share_url(file_id, note_ids):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
     cfg = {"overview": True, "transcript": False, "audio": False, "notes": note_ids}
-    r = requests.post(f"{PLAUD_API}/share/public/get", headers=headers,
+    r = HTTP.post(f"{PLAUD_API}/share/public/get", headers=headers,
                       json={"object_id": file_id, "object_type": "file"}, timeout=30)
     r.raise_for_status()
     data = r.json().get("data", {})
@@ -173,10 +175,10 @@ def get_share_url(file_id, note_ids):
     if url:
         c = data.get("content_config", {})
         if not c.get("overview") or not c.get("notes") or c.get("transcript"):
-            requests.post(f"{PLAUD_API}/share/public/update", headers=headers,
+            HTTP.post(f"{PLAUD_API}/share/public/update", headers=headers,
                           json={"object_id": file_id, "object_type": "file", "content_config": cfg}, timeout=30)
         return url
-    r2 = requests.post(f"{PLAUD_API}/share/public/create", headers=headers,
+    r2 = HTTP.post(f"{PLAUD_API}/share/public/create", headers=headers,
                        json={"object_id": file_id, "object_type": "file", "content_config": cfg}, timeout=30)
     r2.raise_for_status()
     return r2.json().get("data", {}).get("share_url", "")
@@ -251,7 +253,7 @@ interviewer は録音タイトルの付け忘れを見つけるためだけに�
 # Sheets 操作
 # ==============================
 def get_all_sheets(service, ssid=None):
-    meta = service.spreadsheets().get(spreadsheetId=ssid or SHEET_ID).execute()
+    meta = service.spreadsheets().get(spreadsheetId=ssid or SHEET_ID).execute(num_retries=3)
     return {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta["sheets"]}
 
 
@@ -261,7 +263,7 @@ def get_existing_ids(service, tab_titles, ssid=None):
     ranges = [f"{t}!E2:E" for t in tab_titles if t not in NON_STAFF_TABS]
     if not ranges:
         return ids
-    resp = service.spreadsheets().values().batchGet(spreadsheetId=ssid or SHEET_ID, ranges=ranges).execute()
+    resp = service.spreadsheets().values().batchGet(spreadsheetId=ssid or SHEET_ID, ranges=ranges).execute(num_retries=3)
     for vr in resp.get("valueRanges", []):
         for row in vr.get("values", []):
             if row and row[0].strip():
@@ -278,7 +280,7 @@ def ensure_tab(service, title, sheets_map, ssid=None):
         resp = service.spreadsheets().batchUpdate(
             spreadsheetId=ssid,
             body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"columnCount": 5, "frozenRowCount": 1}}}}]},
-        ).execute()
+        ).execute(num_retries=3)
         sid = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
     except Exception as e:
         if "すでに存在" in str(e) or "already exists" in str(e):
@@ -290,7 +292,7 @@ def ensure_tab(service, title, sheets_map, ssid=None):
     service.spreadsheets().values().update(
         spreadsheetId=ssid, range=f"{title}!A1:E1",
         valueInputOption="RAW", body={"values": [HEADER]},
-    ).execute()
+    ).execute(num_retries=3)
     # 折り返し表示＋上揃え（全部見えるように）、ヘッダー太字、列幅調整
     widths = {0: 95, 1: 560, 2: 420, 3: 115, 4: 115}  # 面談日/要約/TODO/リンク/録音ID
     reqs = [
@@ -307,7 +309,7 @@ def ensure_tab(service, title, sheets_map, ssid=None):
         reqs.append({"updateDimensionProperties": {
             "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": col, "endIndex": col + 1},
             "properties": {"pixelSize": px}, "fields": "pixelSize"}})
-    service.spreadsheets().batchUpdate(spreadsheetId=ssid, body={"requests": reqs}).execute()
+    service.spreadsheets().batchUpdate(spreadsheetId=ssid, body={"requests": reqs}).execute(num_retries=3)
     return sid
 
 
@@ -334,7 +336,7 @@ def sort_tab_desc(service, sheet_id, ssid=None):
             "range": {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 5},
             "sortSpecs": [{"dimensionIndex": 0, "sortOrder": "DESCENDING"}],
         }}]},
-    ).execute()
+    ).execute(num_retries=3)
 
 
 def append_rows(service, title, rows, ssid=None):
@@ -343,7 +345,7 @@ def append_rows(service, title, rows, ssid=None):
         spreadsheetId=ssid or SHEET_ID, range=f"{title}!A1",
         valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
         body={"values": rows},
-    ).execute()
+    ).execute(num_retries=3)
     m = re.search(r"![A-Z]+(\d+)", resp.get("updates", {}).get("updatedRange", ""))
     return int(m.group(1)) if m else None
 
@@ -361,7 +363,7 @@ def color_row(service, sheet_id, row_no, is_kanbu, ssid=None):
                       "startColumnIndex": 0, "endColumnIndex": 5},
             "cell": {"userEnteredFormat": {"backgroundColor": bg}},
             "fields": "userEnteredFormat.backgroundColor"}}]},
-    ).execute()
+    ).execute(num_retries=3)
 
 
 # ==============================
@@ -378,11 +380,11 @@ def notify_shincho(message, bot_id=None):
         now = int(time.time())
         assertion = pyjwt.encode({"iss": LW_CLIENT_ID, "sub": LW_SERVICE_ACCOUNT, "iat": now, "exp": now + 3600},
                                  LW_PRIVATE_KEY, algorithm="RS256")
-        tok = requests.post("https://auth.worksmobile.com/oauth2/v2.0/token",
+        tok = HTTP.post("https://auth.worksmobile.com/oauth2/v2.0/token",
                             data={"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion,
                                   "client_id": LW_CLIENT_ID, "client_secret": LW_CLIENT_SECRET, "scope": "bot"},
                             timeout=30).json()["access_token"]
-        requests.post(f"https://www.worksapis.com/v1.0/bots/{bot_id or LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
+        HTTP.post(f"https://www.worksapis.com/v1.0/bots/{bot_id or LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
                       headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
                       json={"content": {"type": "text", "text": message}}, timeout=30).raise_for_status()
         print("  院長DM通知完了")

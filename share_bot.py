@@ -19,6 +19,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import requests
+from sheets_retry import requests_session  # 一時エラー(503/タイムアウト)を自動で再試行（2026-09-12）
+HTTP = requests_session()
 
 from clinic_calendar import closed_reason
 
@@ -84,7 +86,7 @@ def norm(title):
 def find_target_files():
     """過去DAYS_BACK日の録音から、ルートに一致するものを古い順で返す"""
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    r = requests.get(
+    r = HTTP.get(
         f"{PLAUD_API}/file/simple/web?skip=0&limit=200&is_trash=0&sort_by=start_time&is_desc=true",
         headers=headers, timeout=30,
     )
@@ -106,7 +108,7 @@ def find_target_files():
 
 def get_file_detail(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    r = requests.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
+    r = HTTP.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
     r.raise_for_status()
     return r.json().get("data", {})
 
@@ -128,7 +130,7 @@ def get_share_url(file_id, note_ids):
     """共有リンクを取得（無ければ作成）。文字起こし・音声は常に非表示"""
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
     cfg = {"overview": True, "transcript": False, "audio": False, "notes": note_ids}
-    r = requests.post(f"{PLAUD_API}/share/public/get", headers=headers,
+    r = HTTP.post(f"{PLAUD_API}/share/public/get", headers=headers,
                       json={"object_id": file_id, "object_type": "file"}, timeout=30)
     r.raise_for_status()
     data = r.json().get("data", {})
@@ -136,10 +138,10 @@ def get_share_url(file_id, note_ids):
     if url:
         c = data.get("content_config", {})
         if not c.get("overview") or not c.get("notes") or c.get("transcript"):
-            requests.post(f"{PLAUD_API}/share/public/update", headers=headers,
+            HTTP.post(f"{PLAUD_API}/share/public/update", headers=headers,
                           json={"object_id": file_id, "object_type": "file", "content_config": cfg}, timeout=30)
         return url
-    r2 = requests.post(f"{PLAUD_API}/share/public/create", headers=headers,
+    r2 = HTTP.post(f"{PLAUD_API}/share/public/create", headers=headers,
                        json={"object_id": file_id, "object_type": "file", "content_config": cfg}, timeout=30)
     r2.raise_for_status()
     return r2.json().get("data", {}).get("share_url", "")
@@ -168,7 +170,7 @@ def get_sheets_service():
 
 def ensure_log_tab(service):
     """配信ログタブを用意。新規作成した場合はTrueを返す（=初回実行）"""
-    meta = service.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+    meta = service.spreadsheets().get(spreadsheetId=SHEET_ID).execute(num_retries=3)
     titles = {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta["sheets"]}
     if LOG_TAB in titles:
         return False
@@ -176,12 +178,12 @@ def ensure_log_tab(service):
         spreadsheetId=SHEET_ID,
         body={"requests": [{"addSheet": {"properties": {
             "title": LOG_TAB, "gridProperties": {"columnCount": 5, "frozenRowCount": 1}}}}]},
-    ).execute()
+    ).execute(num_retries=3)
     sid = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
     service.spreadsheets().values().update(
         spreadsheetId=SHEET_ID, range=f"{LOG_TAB}!A1:E1",
         valueInputOption="RAW", body={"values": [LOG_HEADER]},
-    ).execute()
+    ).execute(num_retries=3)
     widths = {0: 150, 1: 130, 2: 420, 3: 110, 4: 130}
     reqs = [
         {"repeatCell": {"range": {"sheetId": sid},
@@ -196,13 +198,13 @@ def ensure_log_tab(service):
         reqs.append({"updateDimensionProperties": {
             "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": col, "endIndex": col + 1},
             "properties": {"pixelSize": px}, "fields": "pixelSize"}})
-    service.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": reqs}).execute()
+    service.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": reqs}).execute(num_retries=3)
     return True
 
 
 def get_sent_ids(service):
     resp = service.spreadsheets().values().get(
-        spreadsheetId=SHEET_ID, range=f"{LOG_TAB}!A2:A").execute()
+        spreadsheetId=SHEET_ID, range=f"{LOG_TAB}!A2:A").execute(num_retries=3)
     return {row[0].strip() for row in resp.get("values", []) if row and row[0].strip()}
 
 
@@ -213,7 +215,7 @@ def append_log(service, rows):
         spreadsheetId=SHEET_ID, range=f"{LOG_TAB}!A1",
         valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
         body={"values": rows},
-    ).execute()
+    ).execute(num_retries=3)
 
 
 # ==============================
@@ -225,7 +227,7 @@ def get_lw_access_token():
     assertion = pyjwt.encode(
         {"iss": LW_CLIENT_ID, "sub": LW_SERVICE_ACCOUNT, "iat": now, "exp": now + 3600},
         LW_PRIVATE_KEY, algorithm="RS256")
-    r = requests.post("https://auth.worksmobile.com/oauth2/v2.0/token",
+    r = HTTP.post("https://auth.worksmobile.com/oauth2/v2.0/token",
                       data={"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
                             "assertion": assertion, "client_id": LW_CLIENT_ID,
                             "client_secret": LW_CLIENT_SECRET, "scope": "bot"},
@@ -246,7 +248,7 @@ def send_lw(dest, message):
         _lw_token_cache["token"] = get_lw_access_token()
     headers = {"Authorization": f"Bearer {_lw_token_cache['token']}", "Content-Type": "application/json"}
     kind = "users" if dest[0] == "user" else "channels"
-    r = requests.post(f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/{kind}/{dest[1]}/messages",
+    r = HTTP.post(f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/{kind}/{dest[1]}/messages",
                       headers=headers, json={"content": {"type": "text", "text": message}}, timeout=30)
     r.raise_for_status()
 

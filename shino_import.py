@@ -44,7 +44,7 @@ def ensure_import_tab(service):
         body={"requests": [{"addSheet": {"properties": {
             "title": IMPORT_TAB, "index": 1,
             "gridProperties": {"columnCount": 4, "frozenRowCount": 3}}}}]},
-    ).execute()
+    ).execute(num_retries=3)
     sid = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
     service.spreadsheets().values().update(
         spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A1:D3", valueInputOption="RAW",
@@ -52,7 +52,7 @@ def ensure_import_tab(service):
             ["■ シノが実施した面談を取り込む場所です。A列にPLAUDの共有URLを貼るだけでOK（1行に1つ）。", "", "", ""],
             ["　毎晩21時ごろ、自動で読み取って該当スタッフのタブに青い行で追記します。C・D列はBotが書くので触らないでください。", "", "", ""],
             IMPORT_HEADER]},
-    ).execute()
+    ).execute(num_retries=3)
     service.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": [
         {"repeatCell": {"range": {"sheetId": sid, "startRowIndex": 2, "endRowIndex": 3},
                         "cell": {"userEnteredFormat": {"textFormat": {"bold": True},
@@ -64,7 +64,7 @@ def ensure_import_tab(service):
         {"updateDimensionProperties": {
             "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 1, "endIndex": 4},
             "properties": {"pixelSize": 180}, "fields": "pixelSize"}},
-    ]}).execute()
+    ]}).execute(num_retries=3)
     print(f"取り込みタブを作成: {IMPORT_TAB}")
     return sid
 
@@ -174,14 +174,14 @@ def sync_from_inbox(service):
     try:
         inbox = service.spreadsheets().values().get(
             spreadsheetId=INBOX_SHEET_ID,
-            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute().get("values", [])
+            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute(num_retries=3).get("values", [])
     except Exception as e:
         print(f"  投函箱を読めませんでした: {e}")
         return
     if not inbox:
         return
     cur = service.spreadsheets().values().get(
-        spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:A").execute().get("values", [])
+        spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:A").execute(num_retries=3).get("values", [])
     have = {r[0].strip() for r in cur if r and r[0].strip()}
 
     add, marks = [], []
@@ -201,12 +201,12 @@ def sync_from_inbox(service):
         service.spreadsheets().values().append(
             spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4",
             valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
-            body={"values": add}).execute()
+            body={"values": add}).execute(num_retries=3)
         print(f"  投函箱から{len(add)}件を受け取りました")
     if marks:
         service.spreadsheets().values().batchUpdate(spreadsheetId=INBOX_SHEET_ID, body={
             "valueInputOption": "USER_ENTERED",
-            "data": [{"range": f"{INBOX_TAB}!C{n}", "values": [[m]]} for n, m in marks]}).execute()
+            "data": [{"range": f"{INBOX_TAB}!C{n}", "values": [[m]]} for n, m in marks]}).execute(num_retries=3)
 
 
 def writeback_to_inbox(service):
@@ -215,9 +215,9 @@ def writeback_to_inbox(service):
     try:
         inbox = service.spreadsheets().values().get(
             spreadsheetId=INBOX_SHEET_ID,
-            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute().get("values", [])
+            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute(num_retries=3).get("values", [])
         done = service.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute().get("values", [])
+            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute(num_retries=3).get("values", [])
     except Exception as e:
         print(f"  投函箱への結果反映をスキップ: {e}")
         return
@@ -244,7 +244,7 @@ def writeback_to_inbox(service):
             data.append({"range": f"{INBOX_TAB}!C{i + INBOX_FIRST_ROW}", "values": [[msg]]})
     if data:
         service.spreadsheets().values().batchUpdate(spreadsheetId=INBOX_SHEET_ID, body={
-            "valueInputOption": "USER_ENTERED", "data": data}).execute()
+            "valueInputOption": "USER_ENTERED", "data": data}).execute(num_retries=3)
         print(f"  投函箱に結果を{len(data)}件返しました")
 
 
@@ -264,7 +264,7 @@ def _load_watch_state(service):
     """前回知らせた内容と日付を読む。無ければ空。"""
     try:
         v = service.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID, range=WATCH_CELL).execute().get("values", [])
+            spreadsheetId=SHEET_ID, range=WATCH_CELL).execute(num_retries=3).get("values", [])
         cell = v[0][0] if v and v[0] else ""
     except Exception:
         cell = ""
@@ -281,7 +281,7 @@ def _save_watch_state(service, sig):
     today = datetime.now(JST).strftime("%Y-%m-%d")
     service.spreadsheets().values().update(
         spreadsheetId=SHEET_ID, range=WATCH_CELL, valueInputOption="RAW",
-        body={"values": [[f"見張りの控え {today}|{sig}"]]}).execute()
+        body={"values": [[f"見張りの控え {today}|{sig}"]]}).execute(num_retries=3)
 
 
 def watchdog(service):
@@ -301,9 +301,9 @@ def watchdog(service):
     try:
         inbox = service.spreadsheets().values().get(
             spreadsheetId=INBOX_SHEET_ID,
-            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute().get("values", [])
+            range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute(num_retries=3).get("values", [])
         done = service.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute().get("values", [])
+            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute(num_retries=3).get("values", [])
     except Exception as e:
         print(f"  見張りをスキップ: {e}")
         return
@@ -376,7 +376,7 @@ def main():
     sync_from_inbox(service)
 
     rows = service.spreadsheets().values().get(
-        spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute().get("values", [])
+        spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute(num_retries=3).get("values", [])
     todo = [(i + 4, r) for i, r in enumerate(rows)
             if r and r[0].strip().startswith("http") and not (len(r) > 2 and r[2].strip())]
     print(f"未取り込みのURL: {len(todo)}件")
@@ -426,7 +426,7 @@ def main():
                     "range": {"sheetId": sid, "startRowIndex": wrote_at - 1, "endRowIndex": wrote_at,
                               "startColumnIndex": 0, "endColumnIndex": 5},
                     "cell": {"userEnteredFormat": {"backgroundColor": SHINO_BG}},
-                    "fields": "userEnteredFormat.backgroundColor"}}]}).execute()
+                    "fields": "userEnteredFormat.backgroundColor"}}]}).execute(num_retries=3)
             sort_tab_desc(service, sid, SHEET_ID)
             n_todo = len(analysis.get("todos") or [])
             print(f"  取り込み[{name}] {date} やること{n_todo}件: {title[:30]}")
@@ -440,7 +440,7 @@ def main():
     now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
     service.spreadsheets().values().batchUpdate(spreadsheetId=SHEET_ID, body={
         "valueInputOption": "USER_ENTERED",
-        "data": [{"range": f"{IMPORT_TAB}!C{n}:D{n}", "values": [[now, msg]]} for n, msg in results]}).execute()
+        "data": [{"range": f"{IMPORT_TAB}!C{n}:D{n}", "values": [[now, msg]]} for n, msg in results]}).execute(num_retries=3)
     writeback_to_inbox(service)   # シノにも結果を返す（中身は返さない）
 
     print(f"完了: 新規{len(added)}件")

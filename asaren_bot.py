@@ -7,6 +7,8 @@
 3. LINE WORKS Bot APIで「歯科医師」チャンネルに投稿
 """
 import json, gzip, requests, os, sys, time, re
+from sheets_retry import requests_session  # 一時エラー(503/タイムアウト)を自動で再試行（2026-09-12）
+HTTP = requests_session()
 from datetime import datetime, timezone, timedelta
 
 from clinic_calendar import closed_reason
@@ -35,7 +37,7 @@ LW_PRIVATE_KEY    = os.environ["LW_PRIVATE_KEY"]
 
 def find_latest_asaren():
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    r = requests.get(
+    r = HTTP.get(
         f"{PLAUD_API}/file/simple/web?skip=0&limit=50&is_trash=0&sort_by=start_time&is_desc=true",
         headers=headers, timeout=30
     )
@@ -53,7 +55,7 @@ def find_latest_asaren():
 
 def get_file_detail(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
-    r = requests.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
+    r = HTTP.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
     r.raise_for_status()
     return r.json().get("data", {})
 
@@ -61,7 +63,7 @@ def get_file_detail(file_id):
 def get_file_summary(detail):
     for item in detail.get("content_list", []):
         if item.get("data_type") == "auto_sum_note":
-            r_s3 = requests.get(item["data_link"], timeout=30)
+            r_s3 = HTTP.get(item["data_link"], timeout=30)
             print(f"S3レスポンス: status={r_s3.status_code}, size={len(r_s3.content)}bytes")
             # ① gzip + JSON 形式（旧形式）
             try:
@@ -99,7 +101,7 @@ def get_share_url(file_id, note_ids):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
     content_config = {"overview": True, "transcript": False, "audio": False, "notes": note_ids}
 
-    r = requests.post(
+    r = HTTP.post(
         f"{PLAUD_API}/share/public/get", headers=headers,
         json={"object_id": file_id, "object_type": "file"}, timeout=30
     )
@@ -110,7 +112,7 @@ def get_share_url(file_id, note_ids):
     if share_url:
         cfg = data.get("content_config", {})
         if not cfg.get("overview") or not cfg.get("notes") or cfg.get("transcript"):
-            r_upd = requests.post(
+            r_upd = HTTP.post(
                 f"{PLAUD_API}/share/public/update", headers=headers,
                 json={"object_id": file_id, "object_type": "file", "content_config": content_config},
                 timeout=30
@@ -118,7 +120,7 @@ def get_share_url(file_id, note_ids):
             print(f"共有設定更新: {r_upd.status_code} {r_upd.text[:200]}")
         return share_url
 
-    r2 = requests.post(
+    r2 = HTTP.post(
         f"{PLAUD_API}/share/public/create", headers=headers,
         json={"object_id": file_id, "object_type": "file", "content_config": content_config},
         timeout=30
@@ -143,12 +145,12 @@ def append_to_google_docs(title, summary, share_url):
     today = datetime.now(JST).strftime("%Y-%m-%d")
     sep = "=" * 50
     content = f"\n\n{sep}\n{today}  {title}\n{sep}\n\n{summary}\n\n共有リンク: {share_url}\n"
-    doc = service.documents().get(documentId=GOOGLE_DOCS_ID).execute()
+    doc = service.documents().get(documentId=GOOGLE_DOCS_ID).execute(num_retries=3)
     end_index = doc["body"]["content"][-1]["endIndex"] - 1
     service.documents().batchUpdate(
         documentId=GOOGLE_DOCS_ID,
         body={"requests": [{"insertText": {"location": {"index": end_index}, "text": content}}]}
-    ).execute()
+    ).execute(num_retries=3)
     print(f"Google Docs更新完了: {len(content)}文字")
 
 
@@ -163,7 +165,7 @@ def get_lw_access_token():
         {"iss": LW_CLIENT_ID, "sub": LW_SERVICE_ACCOUNT, "iat": now, "exp": now + 3600},
         LW_PRIVATE_KEY, algorithm="RS256"
     )
-    r = requests.post(
+    r = HTTP.post(
         "https://auth.worksmobile.com/oauth2/v2.0/token",
         data={
             "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -181,7 +183,7 @@ def get_lw_access_token():
 def send_to_lineworks(message):
     access_token = get_lw_access_token()
     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-    r = requests.post(
+    r = HTTP.post(
         f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/channels/{LW_ASAREN_CH}/messages",
         headers=headers,
         json={"content": {"type": "text", "text": message}},
@@ -199,7 +201,7 @@ def send_skip_notice(message):
     """
     try:
         access_token = get_lw_access_token()
-        r = requests.post(
+        r = HTTP.post(
             f"https://www.worksapis.com/v1.0/bots/{LW_SKIP_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
             headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
             json={"content": {"type": "text", "text": message}},
@@ -216,7 +218,7 @@ def send_alert_to_shincho(message):
     try:
         access_token = get_lw_access_token()
         headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-        r = requests.post(
+        r = HTTP.post(
             f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
             headers=headers,
             json={"content": {"type": "text", "text": message}},

@@ -153,7 +153,7 @@ def main():
 
     # すでに入っている回は二重に追記しない。REPLACE=1 のときは古い方を消して入れ直す
     replace = os.environ.get("REPLACE", "").strip() in ("1", "true", "yes")
-    found = find_entry_range(docs.get(documentId=doc_id).execute(), entry_date)
+    found = find_entry_range(docs.get(documentId=doc_id).execute(num_retries=3), entry_date)
     if found:
         if not replace:
             print(f"すでに追記済みのためスキップします: {entry_date}"
@@ -161,7 +161,7 @@ def main():
             return
         s, e = found
         docs.batchUpdate(documentId=doc_id, body={"requests": [
-            {"deleteContentRange": {"range": {"startIndex": s, "endIndex": e}}}]}).execute()
+            {"deleteContentRange": {"range": {"startIndex": s, "endIndex": e}}}]}).execute(num_retries=3)
         print(f"既存の {entry_date} の項目を削除しました（{e - s}文字）")
 
     # 見出しの日付を録音日にするため、append_to_google_docs の「今日」を差し替える
