@@ -1,0 +1,3 @@
+# 改行コードを git に変換させない（2026-09-12）。Windows の core.autocrlf=true が毎回「LF will be replaced by CRLF」を出していたため。
+# ファイルは作った時の改行のまま保存・取り出しする（.bat は CRLF のまま、.py/.yml は LF のまま）。
+* -text
