@@ -21,6 +21,10 @@ on:
         description: '1=試運転（投稿・通知しない）'
         required: false
         default: ''
+      as_of:
+        description: '試運転のみ: この日 (YYYY-MM-DD) の夜に動いたことにする'
+        required: false
+        default: ''
 
 jobs:
   run-bot:
@@ -48,4 +52,5 @@ jobs:
           LW_JIKU_CH:              ${{ secrets.LW_JIKU_CH }}
           TARGET_DATE:             ${{ github.event.inputs.target_date }}
           JIKU_DRY_RUN:            ${{ github.event.inputs.dry_run }}
+          JIKU_AS_OF:              ${{ github.event.inputs.as_of }}
         run: python plaud_bot.py

@@ -309,6 +309,9 @@ def main():
     manual = bool(os.environ.get("TARGET_DATE"))
     today = (datetime.strptime(os.environ["TARGET_DATE"], "%Y-%m-%d").date() if manual
              else datetime.now(JST).date())
+    if DRY_RUN and os.environ.get("JIKU_AS_OF"):
+        # 試運転だけ：「この日の夜に動いたら」を再現する（投稿済み判定を実データで確かめる用）
+        today = datetime.strptime(os.environ["JIKU_AS_OF"], "%Y-%m-%d").date()
     wd = today.weekday()   # 月=0 … 水=2 … 土=5
 
     if manual:
