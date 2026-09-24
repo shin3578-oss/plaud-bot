@@ -49,8 +49,14 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
+      - name: Chromium 本体をキャッシュ（規則3・毎回入れ直すと混雑時580秒かかる）
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-chromium-${{ runner.os }}-v1
+
       - name: Chromium をインストール（共有ページを読むため）
-        run: playwright install chromium --with-deps
+        run: playwright install chromium
 
       - name: 後追い追記を実行
         env:

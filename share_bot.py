@@ -50,6 +50,7 @@ LW_CLIENT_ID = "0cAEPO2Yzau80tSsEhxV"
 LW_CLIENT_SECRET = os.environ.get("LW_CLIENT_SECRET", "d7WfxxO2t1")
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID = "12266491"
+LW_FAIL_BOT_ID = "12789558"  # 失敗通知Bot（2026-09-23: 失敗DMをここへ分けた）
 LW_SHINCHO_ID = "shin@ovalcourtdental"
 LW_PRIVATE_KEY = os.environ.get("LW_PRIVATE_KEY", "")
 LW_JIMU_CH = os.environ.get("LW_JIMU_CH", "")  # 事務トークルームID（Bot招待後に設定）
@@ -239,7 +240,7 @@ def get_lw_access_token():
 _lw_token_cache = {}
 
 
-def send_lw(dest, message):
+def send_lw(dest, message, bot_id=None):
     """dest=("user", id) or ("channel", id)。SHARE_MODE=testなら院長DMへ振り替え"""
     if SHARE_MODE == "test":
         message = f"（テスト配信・本来の宛先: {dest[0]}:{dest[1] or '未設定'}）\n\n{message}"
@@ -248,14 +249,14 @@ def send_lw(dest, message):
         _lw_token_cache["token"] = get_lw_access_token()
     headers = {"Authorization": f"Bearer {_lw_token_cache['token']}", "Content-Type": "application/json"}
     kind = "users" if dest[0] == "user" else "channels"
-    r = HTTP.post(f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/{kind}/{dest[1]}/messages",
+    r = HTTP.post(f"https://www.worksapis.com/v1.0/bots/{bot_id or LW_BOT_ID}/{kind}/{dest[1]}/messages",
                       headers=headers, json={"content": {"type": "text", "text": message}}, timeout=30)
     r.raise_for_status()
 
 
-def notify_shincho(message):
+def notify_shincho(message, bot_id=None):
     try:
-        send_lw(("user", LW_SHINCHO_ID), message)
+        send_lw(("user", LW_SHINCHO_ID), message, bot_id=bot_id)
         print("  院長DM通知完了")
     except Exception as e:
         print(f"  院長DM通知エラー: {e}")
@@ -360,7 +361,7 @@ def main():
 
     print(f"完了: 配信{len(sent)}件 / 要約待ち{len(pending)}件 / エラー{len(errors)}件")
     if errors:
-        notify_shincho("⚠️【PLAUD配信Bot】一部の配信に失敗しました\n\n" + "\n".join(errors))
+        notify_shincho("⚠️【PLAUD配信Bot】一部の配信に失敗しました\n\n" + "\n".join(errors), bot_id=LW_FAIL_BOT_ID)
         sys.exit(1)
 
 

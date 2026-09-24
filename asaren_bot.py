@@ -26,6 +26,7 @@ LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID         = "12266491"
 # 休診日スキップの1行だけは完了通知Bot（要対応の既存Botに混ぜない）
 LW_SKIP_BOT_ID    = "12786833"
+LW_FAIL_BOT_ID    = "12789558"  # 失敗通知Bot（2026-09-23: 失敗DMをここへ分けた）
 LW_ASAREN_CH      = "6854ad46-6be5-bc50-f6ea-5efa1831062f"
 LW_SHINCHO_ID     = "shin@ovalcourtdental"
 LW_PRIVATE_KEY    = os.environ["LW_PRIVATE_KEY"]
@@ -64,6 +65,9 @@ def get_file_summary(detail):
     for item in detail.get("content_list", []):
         if item.get("data_type") == "auto_sum_note":
             r_s3 = HTTP.get(item["data_link"], timeout=30)
+            # 2026-09-23: 非200（署名URL期限切れの403 XML など）でも3段フォールバックを素通りし、
+            # エラー本文が「要約」として返っていた。ここで止める。
+            r_s3.raise_for_status()
             print(f"S3レスポンス: status={r_s3.status_code}, size={len(r_s3.content)}bytes")
             # ① gzip + JSON 形式（旧形式）
             try:
@@ -213,13 +217,13 @@ def send_skip_notice(message):
         print(f"休診日スキップ通知の送信に失敗（本体はスキップのまま続行）: {e}")
 
 
-def send_alert_to_shincho(message):
+def send_alert_to_shincho(message, bot_id=None):
     """院長へDMでアラートを送る"""
     try:
         access_token = get_lw_access_token()
         headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
         r = HTTP.post(
-            f"https://www.worksapis.com/v1.0/bots/{LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
+            f"https://www.worksapis.com/v1.0/bots/{bot_id or LW_BOT_ID}/users/{LW_SHINCHO_ID}/messages",
             headers=headers,
             json={"content": {"type": "text", "text": message}},
             timeout=30
@@ -298,7 +302,8 @@ def main():
         if not share_url:
             # 未投稿のまま「成功」で終わらせない（院長に知らせて失敗扱いにする）
             print("ERROR: 共有URL取得失敗")
-            send_alert_to_shincho(f"⚠️【朝練Bot】共有URLの取得に失敗し、投稿できませんでした。\n{title}")
+            send_alert_to_shincho(f"⚠️【朝練Bot】共有URLの取得に失敗し、投稿できませんでした。\n{title}",
+                                  bot_id=LW_FAIL_BOT_ID)
             sys.exit(1)
 
         append_to_google_docs(title, summary, share_url)

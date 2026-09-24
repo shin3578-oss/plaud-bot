@@ -18,6 +18,7 @@ from sheets_retry import requests_session  # 一時エラー(503/タイムアウ
 HTTP = requests_session()
 
 from clinic_calendar import closed_reason
+from llm_json import parse_json_loose, response_text  # AI応答のJSONを安全に読む共通部品（2026-09-23・リポジトリが別のため複製）
 
 # Windowsコンソール(cp932)でも絵文字・ダッシュ等で落ちないようUTF-8出力に
 try:
@@ -136,6 +137,9 @@ def get_summary(file_id):
         if item.get("data_type") != "auto_sum_note":
             continue
         r_s3 = HTTP.get(item["data_link"], timeout=30)
+        # 2026-09-23: 非200（署名URL期限切れの403 XML など）でも3段フォールバックを素通りし、
+        # エラー本文が「要約」として返っていた。ここで止める。
+        r_s3.raise_for_status()
         try:
             return json.loads(gzip.decompress(r_s3.content)).get("ai_content", "")
         except Exception:
@@ -199,6 +203,15 @@ def extract_name(title):
 # ==============================
 # Claude: 要約整形 ＋ やること抽出 ＋ 面談担当推定
 # ==============================
+class SummaryParseError(RuntimeError):
+    """AI要約のJSONが読めなかったときの目印（2026-09-23）。
+
+    以前はここで todos=[]・interviewer=不明 を黙って返していたため、
+    面談のやることが無言で欠落していた。今は1件だけ失敗として記録し、
+    run の最後に件数を通知して赤で終える（他の面談の取り込みは続ける）。
+    """
+
+
 def analyze(summary, staff_name=""):
     import anthropic
     api_key = os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
@@ -233,18 +246,25 @@ interviewer は録音タイトルの付け忘れを見つけるためだけに�
             model=CLAUDE_MODEL, max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = msg.content[0].text.strip()
-        text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+        # content[0] を決め打ちにしない（thinkingブロックが先頭に来ると落ちるため）。
+        # max_tokens で途中に切れた返答もここでエラーになる（不完全なJSONを読ませない）
+        try:
+            text = response_text(msg)
+        except ValueError as e:
+            raise SummaryParseError(str(e)) from e
         if not re.search(r"[Ss]peaker\s*\d", text):
             break
         print(f"  話者ラベルが残ったため再生成（{attempt + 1}回目）")
+    # ``` 剥がしだけでなく、注釈・全角の「，：」・前置きの文も落としながら読む。
+    # どうしても読めなければ返答の全文をログに出してから失敗にする（既定値で黙って通さない）
     try:
-        data = json.loads(text)
-    except Exception:
-        # 抽出失敗時はPLAUD要約をそのまま・TODOなしで通す（黙って落とさない）
-        return {"summary": summary[:350], "todos": [], "interviewer": "不明"}
-    data.setdefault("summary", summary[:350])
-    data.setdefault("todos", [])
+        data = parse_json_loose(text, label="面談要約")
+    except ValueError as e:
+        raise SummaryParseError(str(e)) from e
+    if not isinstance(data.get("todos"), list):
+        raise SummaryParseError(f"todos が配列で返ってこなかった: {str(data.get('todos'))[:200]}")
+    if not str(data.get("summary", "")).strip():
+        raise SummaryParseError("summary が空で返ってきた")
     data.setdefault("interviewer", "不明")
     return data
 
@@ -432,6 +452,7 @@ def main():
 
     added = {"院長": [], "幹部": []}
     errors = []
+    parse_failures = []   # AI要約(JSON)が読めなかった面談。1件でもあれば赤で終える
     # 「面談（…）」で録れているが、話の中では桑野さん・斉藤さんが面談しているように見えるもの。
     # 幹部面談の付け忘れの可能性があるため院長へ知らせるだけで、**振り分けは一切変えない**
     # （印が無いものを幹部へ流さないのは、院長実施の機密面談を守るための安全側の設計。2026-08-05）
@@ -476,11 +497,17 @@ def main():
                 sort_tab_desc(service, sid, b["ssid"])  # 追記のたびに面談日の降順へ整列（最新が一番上）
                 print(f"  追記[{label}／{name}] {f['date']} やること{n_todo}件: {f['title']}")
                 added[label].append(f"{name}（{f['date']}・やること{n_todo}件）")
+        except SummaryParseError as e:
+            # AIの返答が読めなかった1件（全文はログに出ている）。他の面談の取り込みは続ける
+            print(f"  ERROR(AI要約の解析失敗) {f['title']}: {e}")
+            errors.append(f"{f['title']}: AI要約の解析失敗 — {str(e)[:200]}")
+            parse_failures.append(f["title"])
         except Exception as e:
             print(f"  ERROR {f['title']}: {e}")
             errors.append(f"{f['title']}: {e}")
 
-    print(f"完了: 院長{len(added['院長'])}件 / 幹部{len(added['幹部'])}件 / エラー{len(errors)}件")
+    print(f"完了: 院長{len(added['院長'])}件 / 幹部{len(added['幹部'])}件 / エラー{len(errors)}件"
+          f"（うちAI要約の解析失敗{len(parse_failures)}件）")
 
     if added["院長"] or added["幹部"]:
         msg = "【面談記録】新しい面談を記録しました\n"
@@ -498,7 +525,10 @@ def main():
                     "幹部シェア用にも入れる場合はAIに「幹部シェアにも入れて」と伝えてください。")
         notify_shincho(msg)
     if errors:
-        notify_shincho("⚠️【面談記録】一部の面談が記録できませんでした\n\n" + "\n".join(errors))
+        msg = "⚠️【面談記録】一部の面談が記録できませんでした\n\n" + "\n".join(errors)
+        if parse_failures:
+            msg += f"\n\nAI要約の解析失敗 {len(parse_failures)}件（AIの返答の全文はGitHubのログに出ています）"
+        notify_shincho(msg)
         sys.exit(1)
 
 
