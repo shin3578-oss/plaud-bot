@@ -1,12 +1,12 @@
 # ==========================================================
 # 【何をする】軸ミーティングの議事録要約をLINEワークス「軸」チャンネルに投稿
-# 【いつ動く】毎週水曜 21:00｜Cron-job.org「軸MTG Bot」ジョブが起動
-# 【休診日】  休診日は軸MTGを開かないので、起動しても何もせずに終わる。
-#            スキップしたことは院長DMに1行だけ知らせる（完了通知Bot 12786833）。
-#            判定は公開の休診日カレンダー（clinic_calendar.py）。院長指示 2026-08-12
-# 【2026年8月の一時措置】村田さんの卒業に伴い、8月中は軸チャンネルへ投稿せず
-#   院長DMのみに送る（院長が通常LINEの「サブ軸」グループへ手動で共有）。
-#   2026-09-01 から自動で軸チャンネル投稿に戻る（plaud_bot.py の CH_RESUME_DATE）。
+# 【いつ動く】毎週 水・木・金・土 21:00｜Cron-job.org「軸MTG Bot」ジョブが起動
+#            今週（月曜〜当日）の「軸MTG」録音のうち、まだ投稿していないものを探して投稿する。
+#            水曜のうちにPLAUDへ上がらなかった録音も、土曜の夜まで毎晩拾いにいく（院長指示 2026-09-24）。
+#            投稿済みかどうかは議事録Docsに書いた録音IDで判定＝同じ回を二度投稿しない。
+# 【休診日】  今週の水曜が休診なら軸MTGはないので、何もせずに終わる（院長DMに1行・完了通知Bot 12786833）。
+#            判定は公開の休診日カレンダー（clinic_calendar.py）。
+# 【試運転】  dry_run=1 で、探す・判定するところまで。Docs追記・投稿・院長DMはしない。
 # ==========================================================
 name: 軸MTG Bot 議事録自動投稿
 
@@ -14,7 +14,11 @@ on:
   workflow_dispatch:       # Cron-job.org から GitHub API 経由で起動
     inputs:
       target_date:
-        description: '対象日付 (YYYY-MM-DD) 省略時は当日'
+        description: '取り直す録音日 (YYYY-MM-DD)。省略時は今週分の未投稿を探す'
+        required: false
+        default: ''
+      dry_run:
+        description: '1=試運転（投稿・通知しない）'
         required: false
         default: ''
 
@@ -43,4 +47,5 @@ jobs:
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
           LW_JIKU_CH:              ${{ secrets.LW_JIKU_CH }}
           TARGET_DATE:             ${{ github.event.inputs.target_date }}
+          JIKU_DRY_RUN:            ${{ github.event.inputs.dry_run }}
         run: python plaud_bot.py
