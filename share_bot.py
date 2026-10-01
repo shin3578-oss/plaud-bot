@@ -3,7 +3,8 @@
 PLAUD配信Bot - 録音タイトルをトリガーに、PLAUD要約の共有リンクをLINEワークスへ自動配信
   - 「面談（桑野）」→ 桑野碧さんの個人DM（金曜14時〜の面談。当日夜に配信）
   - 「面談（斉藤）」→ 斉藤愛莉さんの個人DM（不定期）
-  - 「事務MTG」    → 事務トークルーム（木曜。LW_JIMU_CH未設定の間はスキップ）
+  - 「面談（篠宮）」→ シノ（篠宮翔鳳さん）の個人DM（木曜。2026-10-01 院長指示で事務MTGと入れ替え）
+  - 「事務MTG」    → 事務トークルーム ※2026-10-01 院長指示で一時中止（ROUTES からコメントアウト）
   - 朝練Bot・軸MTGBotと同じ方式（PLAUD要約リンクを投稿。文字起こし・音声は非表示）
 
 運用:
@@ -11,7 +12,7 @@ PLAUD配信Bot - 録音タイトルをトリガーに、PLAUD要約の共有リ�
   - 配信済み管理は面談記録スプシの「配信ログ」タブ（録音IDで重複防止）
   - 初回実行（配信ログタブが無い時）は既存録音を配信済み扱いで登録し、送信しない
   - 録音はあるが要約未生成 → 院長DMに知らせて翌日再試行
-  - 木曜に事務MTG・金曜に面談（桑野）の録音が無い → 院長DMにアラート
+  - 木曜に面談（篠宮）・金曜に面談（桑野）の録音が無い → 院長DMにアラート
   - SHARE_MODE=test: 全メッセージを院長DMのみに送る（配信ログは更新しない）
 """
 import os, json, gzip, re, time, sys
@@ -69,9 +70,14 @@ ROUTES = [
     {"key": "mendan_saito", "match": "面談（斉藤）",
      "dest": ("user", "ov.20438@ovalcourtdental"),  # 斉藤愛莉さん
      "dest_label": "斉藤さんDM", "header": "【面談議事録】", "expect_weekday": None},  # 不定期
-    {"key": "jimu_mtg", "match": "事務MTG",
-     "dest": ("channel", LW_JIMU_CH),
-     "dest_label": "事務ルーム", "header": "【事務MTG議事録】", "expect_weekday": 3},  # 木曜
+    {"key": "mendan_shino", "match": "面談（篠宮）",
+     "dest": ("user", "asukasama23@ovalcourtdental"),  # 篠宮翔鳳さん（シノ）
+     "dest_label": "シノDM", "header": "【面談議事録】", "expect_weekday": 3},  # 木曜
+    # 事務MTG → 事務ルームは 2026-10-01 院長指示で一時中止（木曜はシノとの面談に入れ替え）。
+    # 再開するときはこの3行を戻し、上の面談（篠宮）と曜日アラートが重ならないか確認する。
+    # {"key": "jimu_mtg", "match": "事務MTG",
+    #  "dest": ("channel", LW_JIMU_CH),
+    #  "dest_label": "事務ルーム", "header": "【事務MTG議事録】", "expect_weekday": 3},  # 木曜
 ]
 
 WEEKDAY_JA = ["月", "火", "水", "木", "金", "土", "日"]
@@ -272,7 +278,7 @@ def main():
     print(f"PLAUD配信Bot 開始: {now.strftime('%Y-%m-%d %H:%M:%S')} JST（{WEEKDAY_JA[weekday]}曜・mode={SHARE_MODE or '本番'}）")
 
     # ── 休診日は丸ごとスキップ（院長指示 2026-08-12）──
-    # 休診日は事務MTGも面談もしない。ここを止めないと「木曜なのに事務MTGの録音が無い」
+    # 休診日は面談をしない。ここを止めないと「木曜なのに面談（篠宮）の録音が無い」
     # 「金曜なのに面談（桑野）の録音が無い」という曜日アラートが休診日に必ず誤爆する。
     # 祝日判定では お盆・年末年始・臨時休診 を拾えないため公開カレンダーで判定する。
     # SHARE_MODE=test（動作確認）のときはガードしない。
