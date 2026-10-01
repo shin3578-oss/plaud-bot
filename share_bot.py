@@ -52,6 +52,7 @@ LW_CLIENT_SECRET = os.environ.get("LW_CLIENT_SECRET", "d7WfxxO2t1")
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID = "12266491"
 LW_FAIL_BOT_ID = "12789558"  # 失敗通知Bot（2026-09-23: 失敗DMをここへ分けた）
+LW_DONE_BOT_ID = "12786833"  # 完了通知Bot（配信できたときの院長への報告）
 LW_SHINCHO_ID = "shin@ovalcourtdental"
 LW_PRIVATE_KEY = os.environ.get("LW_PRIVATE_KEY", "")
 LW_JIMU_CH = os.environ.get("LW_JIMU_CH", "")  # 事務トークルームID（Bot招待後に設定）
@@ -364,6 +365,11 @@ def main():
     if pending:
         notify_shincho("【PLAUD配信Bot】録音は見つかりましたが、PLAUD要約が未生成のため配信できませんでした"
                        "（明日の実行で自動再試行します）。\n\n" + "\n".join(f"・{t}" for t in pending))
+
+    # 配信できた分 → 院長へ完了報告（完了通知Bot。2026-10-02 院長「完了通知って、私にしてくれた？」）
+    if sent:
+        notify_shincho("【PLAUD配信Bot】面談の要約リンクを配信しました\n\n" + "\n".join(f"・{s}" for s in sent),
+                       bot_id=LW_DONE_BOT_ID)
 
     print(f"完了: 配信{len(sent)}件 / 要約待ち{len(pending)}件 / エラー{len(errors)}件")
     if errors:
