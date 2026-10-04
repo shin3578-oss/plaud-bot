@@ -25,7 +25,7 @@ GOOGLE_DOCS_ID = os.environ["GOOGLE_DOCS_ID"]
 GOOGLE_CREDS   = os.environ["GOOGLE_CREDENTIALS_JSON"]
 
 LW_CLIENT_ID       = "0cAEPO2Yzau80tSsEhxV"
-LW_CLIENT_SECRET   = "d7WfxxO2t1"
+LW_CLIENT_SECRET   = os.environ["LW_CLIENT_SECRET"]   # 2026-10-05 直書きをやめてSecretから
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID          = "12266491"
 # 休診日スキップの1行だけは完了通知Bot（要対応の既存Botに混ぜない）

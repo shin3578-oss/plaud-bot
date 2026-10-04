@@ -74,6 +74,7 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           CLAUDE_API_KEY:          ${{ secrets.CLAUDE_API_KEY }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_CLIENT_SECRET:          ${{ secrets.LW_CLIENT_SECRET }}
         run: python mendan_sheets.py
 
       - name: シノ面談 取り込みBotを実行（貼られたPLAUD共有URLを読み取り）
@@ -82,6 +83,7 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           CLAUDE_API_KEY:          ${{ secrets.CLAUDE_API_KEY }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_CLIENT_SECRET:          ${{ secrets.LW_CLIENT_SECRET }}
           NO_NOTIFY:               ${{ inputs.no_notify }}
           WATCH_TEST:              ${{ inputs.watch_test }}
         run: python shino_import.py
@@ -92,6 +94,7 @@ jobs:
           PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_CLIENT_SECRET:          ${{ secrets.LW_CLIENT_SECRET }}
           LW_JIMU_CH:              ${{ secrets.LW_JIMU_CH }}
           SHARE_MODE:              ${{ inputs.share_mode }}
         run: python share_bot.py

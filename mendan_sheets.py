@@ -75,7 +75,7 @@ STAFF_MAP = {
 
 # LINE WORKS（院長DM通知用・plaud_bot.pyと共通の値）
 LW_CLIENT_ID = "0cAEPO2Yzau80tSsEhxV"
-LW_CLIENT_SECRET = os.environ.get("LW_CLIENT_SECRET", "d7WfxxO2t1")
+LW_CLIENT_SECRET = os.environ["LW_CLIENT_SECRET"]
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID = "12786833"  # 完了通知Bot（新規面談記録の完了報告）
 LW_SHINCHO_ID = "shin@ovalcourtdental"

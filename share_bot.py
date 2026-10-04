@@ -48,7 +48,7 @@ else:
 
 # LINE WORKS（朝練Bot・軸MTGBotと共通の値）
 LW_CLIENT_ID = "0cAEPO2Yzau80tSsEhxV"
-LW_CLIENT_SECRET = os.environ.get("LW_CLIENT_SECRET", "d7WfxxO2t1")
+LW_CLIENT_SECRET = os.environ["LW_CLIENT_SECRET"]
 LW_SERVICE_ACCOUNT = "3w266.serviceaccount@ovalcourtdental"
 LW_BOT_ID = "12266491"
 LW_FAIL_BOT_ID = "12789558"  # 失敗通知Bot（2026-09-23: 失敗DMをここへ分けた）

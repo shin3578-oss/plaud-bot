@@ -28,6 +28,7 @@ jobs:
       - name: チャンネル一覧を取得
         env:
           LW_PRIVATE_KEY: ${{ secrets.LW_PRIVATE_KEY }}
+          LW_CLIENT_SECRET: ${{ secrets.LW_CLIENT_SECRET }}
           LW_JIMU_CH:     ${{ secrets.LW_JIMU_CH }}
           VERIFY_CH:      ${{ inputs.verify_channel }}
         run: |
@@ -36,7 +37,7 @@ jobs:
           import jwt as pyjwt
 
           CLIENT_ID = "0cAEPO2Yzau80tSsEhxV"
-          CLIENT_SECRET = "d7WfxxO2t1"
+          CLIENT_SECRET = os.environ["LW_CLIENT_SECRET"]
           BOTS = {
               12266491: "('Д') 既存Bot＝チャンネル送信はこれ",
               12786821: "朝のお知らせBot",

@@ -49,6 +49,7 @@ jobs:
           GOOGLE_DOCS_ID:          ${{ secrets.GOOGLE_DOCS_ID }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_CLIENT_SECRET:          ${{ secrets.LW_CLIENT_SECRET }}
           LW_JIKU_CH:              ${{ secrets.LW_JIKU_CH }}
           TARGET_DATE:             ${{ github.event.inputs.target_date }}
           JIKU_DRY_RUN:            ${{ github.event.inputs.dry_run }}

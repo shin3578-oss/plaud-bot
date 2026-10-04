@@ -41,5 +41,6 @@ jobs:
           GOOGLE_DOCS_ID_ASAREN:   ${{ secrets.GOOGLE_DOCS_ID_ASAREN }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
+          LW_CLIENT_SECRET:          ${{ secrets.LW_CLIENT_SECRET }}
           TARGET_DATE:             ${{ github.event.inputs.target_date }}
         run: python asaren_bot.py
