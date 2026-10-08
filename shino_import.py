@@ -255,7 +255,6 @@ def writeback_to_inbox(service):
 # 「入口が空だから0件」と「入口を読めていないから0件」は画面上まったく同じに見えるため、
 # 0件そのものではなく「投函箱に置かれたのにBotが触れていない行」を異常として見る。
 WATCH_CELL = f"{IMPORT_TAB}!D1"   # 見張りの控え（最後に知らせた日と内容）。Botが使う欄
-STALE_DAYS = 30                   # 投函箱に行があるのに、これだけ取り込みが無ければ知らせる
 RENOTIFY_DAYS = 7                 # 同じ状態が続くとき、何日おきに念押しするか
 LW_FAIL_BOT_ID = "12789558"       # 失敗通知Bot（毎日の完了報告には混ぜない）
 
@@ -302,8 +301,6 @@ def watchdog(service):
         inbox = service.spreadsheets().values().get(
             spreadsheetId=INBOX_SHEET_ID,
             range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute(num_retries=3).get("values", [])
-        done = service.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!A4:D").execute(num_retries=3).get("values", [])
     except Exception as e:
         print(f"  見張りをスキップ: {e}")
         return
@@ -320,22 +317,11 @@ def watchdog(service):
         elif len(cells) < 3 or not cells[2]:
             untouched.append(row_no)       # Botが結果を書けていない＝転記できていない
 
-    # 最後にBotが何かを処理した日（✅でも対象外でもよい。動いた証拠として見る）
-    last_day = None
-    for r in done:
-        stamp = (r[2].strip() if len(r) > 2 else "")[:10]
-        try:
-            d = datetime.strptime(stamp, "%Y-%m-%d").date()
-        except Exception:
-            continue
-        if last_day is None or d > last_day:
-            last_day = d
+    # 「○日取り込みが無い」は見ない（2026-10-09 院長了承）。シノが面談をしない時期にも
+    # 7日おきに鳴り続け、故障と区別できなかったため。8/18型の取りこぼしは上の2つで見つかる。
     today = datetime.now(JST).date()
-    idle = (today - last_day).days if last_day else None
-    has_inbox = any(any((c or "").strip() for c in (r or [])[:2]) for r in inbox)
-    stale = bool(has_inbox and idle is not None and idle >= STALE_DAYS)
 
-    if not (unreadable or untouched or stale):
+    if not (unreadable or untouched):
         print("  見張り: 異常なし")
         return
 
@@ -347,10 +333,8 @@ def watchdog(service):
     if untouched:
         heads = ", ".join(str(n) for n in untouched[:10])
         lines.append(f"・Botが受け取れていない行が{len(untouched)}件（投函箱の {heads} 行目）")
-    if stale:
-        lines.append(f"・最後に取り込んだのは {last_day} で、{idle}日ぶん動いていません")
 
-    sig = f"u{len(unreadable)}/t{len(untouched)}/s{int(stale)}"
+    sig = f"u{len(unreadable)}/t{len(untouched)}"
     prev_sig, prev_day = _load_watch_state(service)
     if sig == prev_sig and prev_day and (today - prev_day).days < RENOTIFY_DAYS:
         print(f"  見張り: 前回と同じ状態のため通知は見送り（{sig}）")
