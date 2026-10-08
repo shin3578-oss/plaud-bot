@@ -284,7 +284,7 @@ def _save_watch_state(service, sig):
 
 
 def watchdog(service):
-    """投函箱の滞留と、取り込みが長く止まっていないかを見て院長DMに知らせる。
+    """投函箱の滞留（読めない行・受け取れていない行）と、投函箱そのものが読めないことを院長DMに知らせる。
     異常が無ければ何も送らない。"""
     # 見張りそのものが届くかを確かめるための1回きりの送信。
     # 本番の文面は使わない（整形の途中で「テスト」が消えて本物の警報に見えないように）。
@@ -302,7 +302,24 @@ def watchdog(service):
             spreadsheetId=INBOX_SHEET_ID,
             range=f"{INBOX_TAB}!A{INBOX_FIRST_ROW}:C").execute(num_retries=3).get("values", [])
     except Exception as e:
-        print(f"  見張りをスキップ: {e}")
+        # 投函箱を開けない（共有が外れた・タブ名が変わった等）と取り込みも全部止まるので赤で知らせる
+        print(f"  見張り: 投函箱を読めません: {e}")
+        prev_sig, prev_day = _load_watch_state(service)
+        today = datetime.now(JST).date()
+        if prev_sig == "read_error" and prev_day and (today - prev_day).days < RENOTIFY_DAYS:
+            return
+        msg = ("🔴【シノ面談の取り込み・見張り】投函箱を開けません\n\n"
+               "共有が外れたか、タブの名前が変わったかもしれません。この状態だと貼られた面談は取り込まれません。\n"
+               f"エラー: {str(e)[:200]}\n\n"
+               f"投函箱: https://docs.google.com/spreadsheets/d/{INBOX_SHEET_ID}/edit")
+        if os.environ.get("NO_NOTIFY") == "1":
+            print("  [NO_NOTIFY] 送らずに表示のみ:\n" + msg)
+        else:
+            notify_shincho(msg, bot_id=LW_FAIL_BOT_ID)
+        try:
+            _save_watch_state(service, "read_error")
+        except Exception as e2:
+            print(f"  見張りの控えを書けません: {e2}")
         return
 
     unreadable, untouched = [], []
