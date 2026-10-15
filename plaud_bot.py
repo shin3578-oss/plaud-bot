@@ -292,9 +292,9 @@ def send_skip_notice(message):
             timeout=30
         )
         r.raise_for_status()
-        print("休診日スキップの1行を院長DMへ送信しました")
+        print(f"院長DMへ送信しました: {message.splitlines()[0]}")
     except Exception as e:
-        print(f"休診日スキップ通知の送信に失敗（本体はスキップのまま続行）: {e}")
+        print(f"院長DMへの送信に失敗（本体の判断は変えずに続行）: {e}")
 
 
 # ========================
