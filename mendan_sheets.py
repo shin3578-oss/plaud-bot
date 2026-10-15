@@ -346,6 +346,15 @@ def build_rows(date, analysis, share_url, rec_id):
     return [[date, summ, todo_text, share_url, rec_id]]
 
 
+def format_minutes(name, date, summary, todo_text, share_url):
+    """院長の個人DMに投下する議事録1通ぶん。LINEワークスの1通は2000字までなので超えたら切る。"""
+    msg = (f"【面談議事録】{name}さん　{date}\n\n"
+           f"■ 要約\n{summary}\n\n"
+           f"■ その日決まったこと\n{todo_text}\n\n"
+           f"PLAUD: {share_url}")
+    return msg if len(msg) <= 1900 else msg[:1850] + "…\n（長いため途中まで。全文はPLAUDリンクで）"
+
+
 def sort_tab_desc(service, sheet_id, ssid=None):
     """面談日（A列）で降順ソート＝最新の面談が常に一番上。
     PLAUDの取得順やバックフィルの都合で行が前後しても、追記のたびにここで整列する。
@@ -457,6 +466,7 @@ def main():
     # 幹部面談の付け忘れの可能性があるため院長へ知らせるだけで、**振り分けは一切変えない**
     # （印が無いものを幹部へ流さないのは、院長実施の機密面談を守るための安全側の設計。2026-08-05）
     suspects = []
+    minutes = []          # 院長の個人DMへ投下する議事録（1面談1通）
     for f in files:
         try:
             name = extract_name(f["title"])
@@ -497,6 +507,8 @@ def main():
                 sort_tab_desc(service, sid, b["ssid"])  # 追記のたびに面談日の降順へ整列（最新が一番上）
                 print(f"  追記[{label}／{name}] {f['date']} やること{n_todo}件: {f['title']}")
                 added[label].append(f"{name}（{f['date']}・やること{n_todo}件）")
+            # 議事録の本文を院長の個人DMへ投下する（2026-10-16 院長指示）。1面談1回・スタッフ本人には送らない
+            minutes.append(format_minutes(name, f["date"], rows[0][1], rows[0][2], share_url))
         except SummaryParseError as e:
             # AIの返答が読めなかった1件（全文はログに出ている）。他の面談の取り込みは続ける
             print(f"  ERROR(AI要約の解析失敗) {f['title']}: {e}")
@@ -508,6 +520,9 @@ def main():
 
     print(f"完了: 院長{len(added['院長'])}件 / 幹部{len(added['幹部'])}件 / エラー{len(errors)}件"
           f"（うちAI要約の解析失敗{len(parse_failures)}件）")
+
+    for m in minutes:
+        notify_shincho(m)
 
     if added["院長"] or added["幹部"]:
         msg = "【面談記録】新しい面談を記録しました\n"
