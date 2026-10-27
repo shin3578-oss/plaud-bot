@@ -257,6 +257,23 @@ def writeback_to_inbox(service):
 WATCH_CELL = f"{IMPORT_TAB}!D1"   # 見張りの控え（最後に知らせた日と内容）。Botが使う欄
 RENOTIFY_DAYS = 7                 # 同じ状態が続くとき、何日おきに念押しするか
 LW_FAIL_BOT_ID = "12789558"       # 失敗通知Bot（毎日の完了報告には混ぜない）
+STALL_DAYS = 14                   # 最後の取り込みからこの日数リンクが届かなければ「途切れ」として知らせる
+
+
+def _last_import_date(service):
+    """取り込みタブのC列（取り込み日時「2026-08-18 10:18」）の一番新しい日付。無ければ None。"""
+    try:
+        rows = service.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID, range=f"{IMPORT_TAB}!C4:C").execute(num_retries=3).get("values", [])
+    except Exception as e:
+        print(f"  見張り: 取り込み日時を読めません: {e}")
+        return None
+    days = []
+    for r in rows:
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", (r[0] if r else "").strip())
+        if m:
+            days.append(datetime(int(m[1]), int(m[2]), int(m[3])).date())
+    return max(days) if days else None
 
 
 def _load_watch_state(service):
@@ -334,12 +351,32 @@ def watchdog(service):
         elif len(cells) < 3 or not cells[2]:
             untouched.append(row_no)       # Botが結果を書けていない＝転記できていない
 
-    # 「○日取り込みが無い」は見ない（2026-10-09 院長了承）。シノが面談をしない時期にも
-    # 7日おきに鳴り続け、故障と区別できなかったため。8/18型の取りこぼしは上の2つで見つかる。
     today = datetime.now(JST).date()
 
+    # 「○日取り込みが無い」＝途切れの知らせ（2026-10-27 院長指示「今後また途切れることがあれば、それもレポートしてほしい」）。
+    # 10/9 に「面談が無い時期にも鳴る」として一度やめたが、実際には 8/18 から2か月以上リンクが届かず、
+    # 誰も気づかないまま止まっていた。面談が無いのか、貼り忘れなのかは院長がシノに確かめる前提で、途切れたら必ず知らせる
+    last = _last_import_date(service)
+    if last and (today - last).days >= STALL_DAYS:
+        prev_sig, prev_day = _load_watch_state(service)
+        if prev_sig == "stall" and prev_day and (today - prev_day).days < RENOTIFY_DAYS:
+            print(f"  見張り: 途切れ中（最後 {last}）・前回の知らせから{RENOTIFY_DAYS}日たっていないので見送り")
+        else:
+            msg = ("🔴【シノ面談の取り込み】途切れています\n\n"
+                   f"最後にシノからリンクが届いたのは {last.month}/{last.day}（{(today - last).days}日前）です。\n"
+                   "面談が続いているのか、録音のリンクを貼り忘れているのかを、シノに確かめてください。\n"
+                   f"（{RENOTIFY_DAYS}日おきに、届くまで知らせます）\n\n"
+                   f"投函箱: https://docs.google.com/spreadsheets/d/{INBOX_SHEET_ID}/edit")
+            if os.environ.get("NO_NOTIFY") == "1":
+                print("  [NO_NOTIFY] 送らずに表示のみ:\n" + msg)
+            else:
+                notify_shincho(msg, bot_id=LW_FAIL_BOT_ID)
+            _save_watch_state(service, "stall")
+        if not (unreadable or untouched):
+            return
+
     if not (unreadable or untouched):
-        print("  見張り: 異常なし")
+        print(f"  見張り: 異常なし（最後の取り込み {last}）")
         return
 
     lines = []
