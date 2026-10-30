@@ -4,6 +4,8 @@ PLAUD配信Bot - 録音タイトルをトリガーに、PLAUD要約の共有リ�
   - 「面談（桑野）」→ 桑野碧さんの個人DM（金曜14時〜の面談。当日夜に配信）
   - 「面談（斉藤）」→ 斉藤愛莉さんの個人DM（不定期）
   - 「面談（篠宮）」→ シノ（篠宮翔鳳さん）の個人DM（木曜。2026-10-01 院長指示で事務MTGと入れ替え）
+  - 「面談（秋野）」→ 秋野友希先生の個人DM（月1回。2026-10-31 院長指示）。リンクではなく要約の本文だけを送る
+    （院長「録音や文字起こしはなし、要約だけね」）。最後の面談から40日あくと院長DMへ知らせる（7日おき）
   - 「事務MTG」    → 事務トークルーム ※2026-10-01 院長指示で一時中止（ROUTES からコメントアウト）
   - 朝練Bot・軸MTGBotと同じ方式（PLAUD要約リンクを投稿。文字起こし・音声は非表示）
 
@@ -74,6 +76,10 @@ ROUTES = [
     {"key": "mendan_shino", "match": "面談（篠宮）",
      "dest": ("user", "asukasama23@ovalcourtdental"),  # 篠宮翔鳳さん（シノ）
      "dest_label": "シノDM", "header": "【面談議事録】", "expect_weekday": 3},  # 木曜
+    {"key": "mendan_akino", "match": "面談（秋野）",
+     "dest": ("user", "ov.99552@ovalcourtdental"),  # 秋野友希先生
+     "dest_label": "秋野先生DM", "header": "【面談議事録】", "expect_weekday": None,  # 月1回
+     "send": "summary", "stall_days": 40},
     # 事務MTG → 事務ルームは 2026-10-01 院長指示で一時中止（木曜はシノとの面談に入れ替え）。
     # 再開するときはこの3行を戻し、上の面談（篠宮）と曜日アラートが重ならないか確認する。
     # {"key": "jimu_mtg", "match": "事務MTG",
@@ -114,6 +120,20 @@ def find_target_files():
     return sorted(results, key=lambda x: x["date"])
 
 
+def find_last_date(route):
+    """そのルートの録音で一番新しい日付（直近200件から）。無ければNone"""
+    headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
+    r = HTTP.get(
+        f"{PLAUD_API}/file/simple/web?skip=0&limit=200&is_trash=0&sort_by=start_time&is_desc=true",
+        headers=headers, timeout=30,
+    )
+    r.raise_for_status()
+    dates = [datetime.fromtimestamp(f.get("start_time", 0) / 1000, tz=JST).date()
+             for f in r.json().get("data_file_list", [])
+             if norm(f.get("filename", "") or f.get("title", "")).startswith(route["match"])]
+    return max(dates) if dates else None
+
+
 def get_file_detail(file_id):
     headers = {"Authorization": PLAUD_TOKEN, "Content-Type": "application/json"}
     r = HTTP.get(f"{PLAUD_API}/file/detail/{file_id}", headers=headers, timeout=30)
@@ -132,6 +152,47 @@ def has_summary(detail):
 def get_note_ids(detail):
     return [str(i["data_id"]) for i in detail.get("content_list", [])
             if i.get("data_type") in ("auto_sum_note", "sum_multi_note") and i.get("data_id")]
+
+
+def get_summary_text(detail):
+    """PLAUD要約の本文（send="summary" のルート用）。表紙画像の行は除く"""
+    for item in detail.get("content_list", []):
+        if item.get("data_type") != "auto_sum_note":
+            continue
+        r = HTTP.get(item["data_link"], timeout=30)
+        r.raise_for_status()
+        try:
+            text = json.loads(gzip.decompress(r.content)).get("ai_content", "")
+        except Exception:
+            text = r.content.decode("utf-8")
+        text = re.sub(r"!\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\(plaud://[^)]*\)", "", text)
+        text = re.sub(r"^.*オーナー別チェックリスト.*$", "", text, flags=re.M)
+        text = re.sub(r"^-{6,}$", "", text, flags=re.M)
+        text = re.sub(r"^#+\s*", "■ ", text, flags=re.M)
+        text = text.replace("**", "").replace("- [ ] ", "・").replace(" - [TBD]", "")
+        text = re.sub(r"斎藤氏|斉藤氏", "斉藤さん", text)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+    return ""
+
+
+def split_message(text, limit=1900):
+    """LINE WORKSの1通2000字上限に合わせ、段落の切れ目で分ける"""
+    parts, cur = [], ""
+    for para in text.split("\n\n"):
+        if len(para) > limit and cur:
+            parts.append(cur)
+            cur = ""
+        while len(para) > limit:
+            parts.append(para[:limit])
+            para = para[limit:]
+        if cur and len(cur) + len(para) + 2 > limit:
+            parts.append(cur)
+            cur = para
+        else:
+            cur = f"{cur}\n\n{para}" if cur else para
+    if cur:
+        parts.append(cur)
+    return parts
 
 
 def get_share_url(file_id, note_ids):
@@ -214,6 +275,23 @@ def get_sent_ids(service):
     resp = service.spreadsheets().values().get(
         spreadsheetId=SHEET_ID, range=f"{LOG_TAB}!A2:A").execute(num_retries=3)
     return {row[0].strip() for row in resp.get("values", []) if row and row[0].strip()}
+
+
+def recently_notified(service, log_id, now, days):
+    """配信ログに log_id の行が days 日以内にあるか（途切れの知らせを毎日出さないため）"""
+    resp = service.spreadsheets().values().get(
+        spreadsheetId=SHEET_ID, range=f"{LOG_TAB}!A2:B").execute(num_retries=3)
+    for row in resp.get("values", []):
+        if len(row) >= 2 and row[0].strip() == log_id:
+            try:
+                # シートが日時として表示し直しても読めるよう、区切りをそろえて先頭16字だけ見る
+                sent = datetime.strptime(row[1].strip().replace("/", "-")[:16],
+                                         "%Y-%m-%d %H:%M").replace(tzinfo=JST)
+            except ValueError:
+                continue
+            if now - sent < timedelta(days=days):
+                return True
+    return False
 
 
 def append_log(service, rows):
@@ -333,11 +411,29 @@ def main():
                 print(f"  要約未生成→翌日再試行: {f['title']}")
                 pending.append(f["title"])
                 continue
-            share_url = get_share_url(f["id"], get_note_ids(detail))
-            if not share_url:
-                raise RuntimeError("共有URL取得失敗")
-            msg = f"{route['header']}\n{f['title']}\n\nPLAUD要約リンク: {share_url}"
-            send_lw(route["dest"], msg)
+            if route.get("send") == "summary":
+                text = get_summary_text(detail)
+                if not text:
+                    raise RuntimeError("要約本文の取得失敗")
+                parts = split_message(text)
+                for i, part in enumerate(parts, 1):
+                    no = f"（{i}/{len(parts)}）" if len(parts) > 1 else ""
+                    try:
+                        send_lw(route["dest"], f"{route['header']}{f['date'][5:].replace('-', '/')}{no}\n\n{part}")
+                    except Exception as e:
+                        if i == 1:
+                            raise
+                        # 途中まで届いた分を翌日また送らないよう、配信済み（一部）で残して院長に知らせる
+                        if SHARE_MODE != "test":
+                            log_rows.append([f["id"], now.strftime("%Y-%m-%d %H:%M"), f["title"],
+                                             route["dest_label"], f"一部のみ配信（{i - 1}/{len(parts)}）"])
+                        raise RuntimeError(f"{i}/{len(parts)}通目で失敗（{i - 1}通目までは送信済み・残りは手で送ってください）: {e}")
+            else:
+                share_url = get_share_url(f["id"], get_note_ids(detail))
+                if not share_url:
+                    raise RuntimeError("共有URL取得失敗")
+                msg = f"{route['header']}\n{f['title']}\n\nPLAUD要約リンク: {share_url}"
+                send_lw(route["dest"], msg)
             print(f"  配信[{route['dest_label']}]: {f['title']}")
             sent.append(f"{route['dest_label']}: {f['title']}")
             if SHARE_MODE != "test":
@@ -361,6 +457,30 @@ def main():
                 f"明日以降の実行で見つかり次第、{route['dest_label']}へ自動配信します。\n"
                 f"本日実施がなかった場合はこのメッセージは無視してください。")
 
+    # 月1回などの面談が stall_days 日あいた → 院長へ知らせる（7日おき。控えは配信ログの「stall:キー」行）
+    for route in ROUTES:
+        if not route.get("stall_days"):
+            continue
+        try:
+            last = find_last_date(route)
+            days = (now.date() - last).days if last else None
+            if days is not None and days < route["stall_days"]:
+                continue
+            stall_id = f"stall:{route['key']}"
+            if SHARE_MODE != "test" and recently_notified(service, stall_id, now, 7):
+                continue
+            when = f"最後は{last.strftime('%m/%d')}（{days}日前）" if last else "直近200件の録音に見つかりません"
+            notify_shincho(f"🔴【PLAUD配信Bot】「{route['match']}」の録音が{route['stall_days']}日以上ありません（{when}）。\n\n"
+                           f"面談が録れていればPLAUDへアップロードしてください。見つかり次第、{route['dest_label']}へ要約を送ります。",
+                           bot_id=LW_FAIL_BOT_ID)
+            if SHARE_MODE != "test":
+                append_log(service, [[stall_id, now.strftime("%Y-%m-%d %H:%M"),
+                                      f"（{route['match']}が{route['stall_days']}日なし）", "院長DM", "途切れの知らせ"]])
+        except Exception as e:
+            # ここで止まると他の面談の完了通知が出なくなるので、失敗として最後にまとめて知らせる
+            print(f"  ERROR 途切れ判定[{route['key']}]: {e}")
+            errors.append(f"途切れ判定（{route['match']}）: {e}")
+
     # 要約未生成の録音 → 院長へ知らせて翌日再試行
     if pending:
         notify_shincho("【PLAUD配信Bot】録音は見つかりましたが、PLAUD要約が未生成のため配信できませんでした"
@@ -368,7 +488,7 @@ def main():
 
     # 配信できた分 → 院長へ完了報告（完了通知Bot。2026-10-02 院長「完了通知って、私にしてくれた？」）
     if sent:
-        notify_shincho("【PLAUD配信Bot】面談の要約リンクを配信しました\n\n" + "\n".join(f"・{s}" for s in sent),
+        notify_shincho("【PLAUD配信Bot】面談の要約を配信しました\n\n" + "\n".join(f"・{s}" for s in sent),
                        bot_id=LW_DONE_BOT_ID)
 
     print(f"完了: 配信{len(sent)}件 / 要約待ち{len(pending)}件 / エラー{len(errors)}件")
