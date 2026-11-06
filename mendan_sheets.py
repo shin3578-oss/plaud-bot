@@ -56,9 +56,17 @@ HEADER = ["面談日", "要約", "その日決まったTODO", "PLAUDリンク", 
 NON_STAFF_TABS = ("説明", "配信ログ", "シノ面談の取り込み")
 
 # ---- PLAUDトークン（ローカルはplaud_storage.json、Actionsは環境変数） ----
+def _plaud_token_local():
+    """院長PCの _secrets から鍵を取る（期限が近ければ _tools/plaud_auth.py が自動で取り直す）"""
+    import sys as _s
+    _s.path.insert(0, r"C:\Users\shin3\Desktop\AI\_tools")
+    import plaud_auth
+    return plaud_auth.get_token()
+
+
 _token_file = Path(r"C:\Users\shin3\Desktop\AI\_secrets\plaud_storage.json")
 if _token_file.exists():
-    PLAUD_TOKEN = json.loads(_token_file.read_text(encoding="utf-8")).get("pld_tokenstr", "").strip('"')
+    PLAUD_TOKEN = _plaud_token_local()
 else:
     PLAUD_TOKEN = os.environ.get("PLAUD_TOKEN", "").strip('"')
 
