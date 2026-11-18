@@ -24,8 +24,16 @@ from datetime import datetime
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from plaud_bot import (JST, append_to_google_docs, find_latest_jiku_mtg,
+from plaud_bot import (JST, append_to_google_docs, find_jiku_mtgs,
                        get_file_detail, get_file_summary, get_note_ids, get_share_url)
+
+
+def find_latest_jiku_mtg():
+    """TARGET_DATE の日の「軸MTG」録音のうち最後のものを (id, title) で返す（無ければ (None, None)）。
+    plaud_bot 側の同名関数は find_jiku_mtgs に置き換わって無くなったため、ここで包む"""
+    d = datetime.strptime(os.environ["TARGET_DATE"], "%Y-%m-%d").date()
+    found = find_jiku_mtgs(d, d)
+    return (found[-1][0], found[-1][1]) if found else (None, None)
 
 
 # 共有ページを読むための道具（シノ面談の取り込みと同じ作り。iframeの中に本文がある）
@@ -104,7 +112,48 @@ def find_entry_range(doc, entry_date):
     return None
 
 
+def remove_by_record_id(record_id):
+    """「録音ID: <record_id>」を持つ1回分の項目（区切り線〜録音IDの行）を消す。
+    診療の録音を誤って軸MTGと題名に付けて Bot が追記したときの取り消し用（2026-11-18）"""
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    import json
+    creds = service_account.Credentials.from_service_account_info(
+        json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"]),
+        scopes=["https://www.googleapis.com/auth/documents"])
+    docs = build("docs", "v1", credentials=creds).documents()
+    doc_id = os.environ["GOOGLE_DOCS_ID"]
+    doc = docs.get(documentId=doc_id).execute(num_retries=3)
+    paras = []
+    for el in doc["body"]["content"]:
+        p = el.get("paragraph")
+        if p:
+            t = "".join(r.get("textRun", {}).get("content", "") for r in p.get("elements", []))
+            paras.append((el["startIndex"], el["endIndex"], t.strip()))
+    hits = [i for i, (_, _, t) in enumerate(paras) if t == f"録音ID: {record_id}"]
+    if len(hits) != 1:
+        print(f"ERROR: 録音ID {record_id} の行が {len(hits)} 件。消さずに終わります")
+        sys.exit(1)
+    end_i = hits[0]
+    head = max(i for i in range(end_i) if re.match(r"^20\d{2}-\d{2}-\d{2}\s\s", paras[i][2]))
+    s = head - 1
+    while s > 0 and (set(paras[s - 1][2]) == {"="} or paras[s - 1][2] == ""):
+        s -= 1
+    if set(paras[head - 1][2]) != {"="}:
+        print("ERROR: 見出しの前に区切り線が無く、範囲を決められません。消さずに終わります")
+        sys.exit(1)
+    start, end = paras[s][0], paras[end_i][1]
+    print(f"消す項目: {paras[head][2]}（{end - start}文字）")
+    docs.batchUpdate(documentId=doc_id, body={"requests": [
+        {"deleteContentRange": {"range": {"startIndex": start, "endIndex": end}}}]}).execute(num_retries=3)
+    print("削除しました")
+
+
 def main():
+    remove_id = os.environ.get("REMOVE_ID", "").strip()
+    if remove_id:
+        remove_by_record_id(remove_id)
+        return
     share_url = os.environ.get("SHARE_URL", "").strip()
     target_date = os.environ.get("TARGET_DATE", "").strip()
     if not share_url and not target_date:

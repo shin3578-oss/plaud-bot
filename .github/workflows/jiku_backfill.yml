@@ -27,6 +27,10 @@ on:
         description: '本文の最後に付ける注記（任意）'
         required: false
         default: ''
+      remove_id:
+        description: 'この録音IDの回を要約集から消すだけ（誤って追記された回の取り消し用・他の入力は無視）'
+        required: false
+        default: ''
       replace:
         description: '同じ日付がすでにあっても消して入れ直す（取り込み失敗のやり直し用）'
         required: false
@@ -71,4 +75,5 @@ jobs:
           ENTRY_DATE:              ${{ github.event.inputs.entry_date }}
           NOTE:                    ${{ github.event.inputs.note }}
           REPLACE:                 ${{ github.event.inputs.replace }}
+          REMOVE_ID:               ${{ github.event.inputs.remove_id }}
         run: python jiku_backfill.py
