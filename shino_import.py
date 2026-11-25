@@ -15,7 +15,7 @@ URLの入手経路（手貼り／将来的にLINEワークスから自動収集�
 認証: mendan_sheets.py と同じ（Actions=GOOGLE_CREDENTIALS_JSON / ローカル=drive_token.json）
 """
 import os, re, sys
-from datetime import datetime
+from datetime import date, datetime
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -257,7 +257,11 @@ def writeback_to_inbox(service):
 WATCH_CELL = f"{IMPORT_TAB}!D1"   # 見張りの控え（最後に知らせた日と内容）。Botが使う欄
 RENOTIFY_DAYS = 7                 # 同じ状態が続くとき、何日おきに念押しするか
 LW_FAIL_BOT_ID = "12789558"       # 失敗通知Bot（毎日の完了報告には混ぜない）
-STALL_DAYS = 14                   # 最後の取り込みからこの日数リンクが届かなければ「途切れ」として知らせる
+# 院長がシノに確かめて「面談は中止中」と分かったときの一時止め（2026-11-25 院長「確認した、今中止してるんだって」）。
+# 途切れの知らせは外さない決まり（10/27 院長指示）なので、期限つきで止め、期限を過ぎたら「まだ中止中か」をもう一度知らせる。
+# 期限より前でも、新しいリンクが届けば（最後の取り込みが since 以降になれば）ふだんの見張りに戻る
+PAUSED = {"since": "2026-11-25", "until": "2026-12-25", "why": "院長がシノに確認：面談は今中止している"}
+STALL_DAYS = 14                  # 最後の取り込みからこの日数リンクが届かなければ「途切れ」として知らせる
 
 
 def _last_import_date(service):
@@ -357,14 +361,19 @@ def watchdog(service):
     # 10/9 に「面談が無い時期にも鳴る」として一度やめたが、実際には 8/18 から2か月以上リンクが届かず、
     # 誰も気づかないまま止まっていた。面談が無いのか、貼り忘れなのかは院長がシノに確かめる前提で、途切れたら必ず知らせる
     last = _last_import_date(service)
-    if last and (today - last).days >= STALL_DAYS:
+    paused = (last and last < date.fromisoformat(PAUSED["since"]) <= today < date.fromisoformat(PAUSED["until"]))
+    if last and (today - last).days >= STALL_DAYS and paused:
+        print(f"  見張り: 途切れ中（最後 {last}）だが、{PAUSED['since']} {PAUSED['why']} → {PAUSED['until']} まで知らせない")
+    elif last and (today - last).days >= STALL_DAYS:
         prev_sig, prev_day = _load_watch_state(service)
         if prev_sig == "stall" and prev_day and (today - prev_day).days < RENOTIFY_DAYS:
             print(f"  見張り: 途切れ中（最後 {last}）・前回の知らせから{RENOTIFY_DAYS}日たっていないので見送り")
         else:
             msg = ("🔴【シノ面談の取り込み】途切れています\n\n"
                    f"最後にシノからリンクが届いたのは {last.month}/{last.day}（{(today - last).days}日前）です。\n"
-                   "面談が続いているのか、録音のリンクを貼り忘れているのかを、シノに確かめてください。\n"
+                   + (f"{PAUSED['since']} に「{PAUSED['why']}」と確かめてから時間がたちました。まだ中止中か、再開しているかを、シノに確かめてください。\n"
+                      if last < date.fromisoformat(PAUSED["since"]) <= date.fromisoformat(PAUSED["until"]) <= today else
+                      "面談が続いているのか、録音のリンクを貼り忘れているのかを、シノに確かめてください。\n") +
                    f"（{RENOTIFY_DAYS}日おきに、届くまで知らせます）\n\n"
                    f"投函箱: https://docs.google.com/spreadsheets/d/{INBOX_SHEET_ID}/edit")
             if os.environ.get("NO_NOTIFY") == "1":
