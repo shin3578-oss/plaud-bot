@@ -294,14 +294,23 @@ def main():
             send_skip_notice(f"【朝練Bot】本日は{reason}のためスキップしました")
             return
 
-    # 2026-11-27 起動が10:00→9:00頃に早まったので回数を1つ増やした。
-    # GitHub のクラウド実行は1ジョブ6時間（360分）で打ち切られるので、待ちの合計を 55分×6＝330分に収める
-    # （9:05頃・10:00・10:55・11:50・12:45・13:40・14:35頃に探す）
-    MAX_ATTEMPTS = 7
+    # 起動は9:00のジョブからだが、探し始めは10:00（院長指摘 2026-11-27「朝9時だと間に合わないから時間ずらしてた」。
+    # 録音は8:55〜9:26ごろに上がり、要約ができるまでさらにかかる。2026-06-10 にも10:00時点で要約が未生成だった）。
+    # GitHub のクラウド実行は1ジョブ6時間（360分）で打ち切られるので、9:00起動→10:00から55分おきに6回＝14:35頃まで
+    # （10:00・10:55・11:50・12:45・13:40・14:35頃に探す・合計約335分）
+    MAX_ATTEMPTS = 6
     RETRY_INTERVAL = 3300      # 55分
-    ALERT_AFTER_ATTEMPTS = 3   # 3回目（10:55頃）まで見つからなければ1度だけアラート送信
+    ALERT_AFTER_ATTEMPTS = 2   # 2回目（10:55頃）まで見つからなければ1度だけアラート送信
+    START_AT_HOUR = 10
     if DOC_ONLY or NO_NOTIFY:  # 過去分の書き足し・試し実行は待たない
         MAX_ATTEMPTS = 1
+    elif not os.environ.get("TARGET_DATE"):
+        now = datetime.now(JST)
+        start = now.replace(hour=START_AT_HOUR, minute=0, second=0, microsecond=0)
+        if now < start:
+            wait = int((start - now).total_seconds())
+            print(f"{now.strftime('%H:%M')} 起動 → {START_AT_HOUR}:00 まで {wait // 60} 分待ってから探します")
+            time.sleep(wait)
     # 対象日は最初に決めて固定する（再試行中に日付をまたぐと翌日を探し始めてしまうため）
     today = os.environ.get("TARGET_DATE", "") or datetime.now(JST).strftime("%Y-%m-%d")
     os.environ["TARGET_DATE"] = today
