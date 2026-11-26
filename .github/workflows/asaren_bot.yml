@@ -1,6 +1,11 @@
 # ==========================================================
-# 【何をする】朝練の録音要約をLINEワークス歯科医師チャンネルに投稿
-# 【いつ動く】水・金 10:00｜Cron-job.org「朝練Bot」ジョブが起動（2026-08-06に水〜土から変更）
+# 【何をする】朝練の録音要約をGoogleドキュメントに記録し、LINEワークス歯科医師チャンネルに投稿
+# 【いつ動く】水〜土 9:00頃｜apotool の sassatopay.yml（月〜土9:00）が水〜土だけ連鎖dispatch
+#            （2026-11-27 再開・院長「寺澤先生の朝練が水曜日から土曜日までつづくから」。
+#             2026-08-21〜11-26は停止。Cron-job.org のジョブは12件上限のため作らない）
+#            見つかるまで55分ごとに最大7回（〜14時台）探す。3回目（10:55頃）まで無ければ院長DMへ1回知らせる。
+# 【同じ録音を二重に書かない】ドキュメントに同じ日付＋題名か共有リンクがあれば、記録も投稿もしない
+# 【過去分の書き足し】target_date＋doc_only=true でドキュメントだけに書く（チャンネルには流さない）
 # 【休診日】  休診日は朝練をしないので、起動しても何もせずに終わる。
 #            スキップしたことは院長DMに1行だけ知らせる（完了通知Bot 12786833）。
 #            判定は公開の休診日カレンダー（clinic_calendar.py）。
@@ -17,11 +22,19 @@ on:
         description: '対象日付 (YYYY-MM-DD) 省略時は当日'
         required: false
         default: ''
+      doc_only:
+        description: 'ドキュメントにだけ書く（チャンネルへ投稿しない・過去分の書き足し用）'
+        required: false
+        default: 'false'
+      no_notify:
+        description: '誰にも送らない（試し実行）'
+        required: false
+        default: 'false'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 370
+    timeout-minutes: 350   # クラウド実行は6時間で打ち切り。待ちは合計330分（asaren_bot.py）
 
     steps:
       - name: リポジトリをチェックアウト
@@ -43,4 +56,21 @@ jobs:
           LW_PRIVATE_KEY:          ${{ secrets.LW_PRIVATE_KEY }}
           LW_CLIENT_SECRET:          ${{ secrets.LW_CLIENT_SECRET }}
           TARGET_DATE:             ${{ github.event.inputs.target_date }}
+          DOC_ONLY:                ${{ github.event.inputs.doc_only }}
+          NO_NOTIFY:               ${{ github.event.inputs.no_notify }}
         run: python asaren_bot.py
+
+      - name: 失敗を院長DMへ（失敗通知Bot）
+        if: failure() && github.event.inputs.no_notify != 'true'
+        env:   # asaren_bot を読み込むと起動時に下の5つを読むので全部渡す
+          PLAUD_TOKEN:             ${{ secrets.PLAUD_TOKEN }}
+          GOOGLE_DOCS_ID_ASAREN:   ${{ secrets.GOOGLE_DOCS_ID_ASAREN }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          LW_PRIVATE_KEY:   ${{ secrets.LW_PRIVATE_KEY }}
+          LW_CLIENT_SECRET: ${{ secrets.LW_CLIENT_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'EOF'
+          import os, asaren_bot as b
+          b.send_alert_to_shincho("⚠️【朝練Bot】実行が失敗しました。ログ: " + os.environ["RUN_URL"], bot_id=b.LW_FAIL_BOT_ID)
+          EOF
